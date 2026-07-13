@@ -1,4 +1,6 @@
-__pycache__/
-*.pyc
 .cookies/
 .log
+/dist/
+/.browser-cache/
+/kg2bb
+*.exe

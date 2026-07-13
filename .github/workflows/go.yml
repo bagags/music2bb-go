@@ -3,7 +3,9 @@ name: Go
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -47,4 +49,66 @@ jobs:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-        run: go build -trimpath -o dist/${{ matrix.output }} ./cmd/kg2bb
+          VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('dev-{0}', github.sha) }}
+        run: |
+          mkdir -p dist
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          go build -trimpath -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${GITHUB_SHA} -X main.date=${BUILD_DATE}" -o dist/${{ matrix.output }} ./cmd/kg2bb
+          cd dist
+          sha256sum '${{ matrix.output }}' > '${{ matrix.output }}.sha256'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.output }}
+          path: dist/*
+          if-no-files-found: error
+
+  browser-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            archive: chromium-darwin-arm64.zip
+            url: https://storage.googleapis.com/chromium-browser-snapshots/Mac_Arm/1321438/chrome-mac.zip
+          - os: windows-latest
+            archive: chromium-windows-amd64.zip
+            url: https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/1321438/chrome-win.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache: true
+      - uses: actions/cache@v4
+        id: browser-cache
+        with:
+          path: .browser-cache/${{ matrix.archive }}
+          key: chromium-1321438-${{ matrix.os }}
+      - name: Download pinned Chromium
+        if: steps.browser-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          mkdir -p .browser-cache
+          curl --fail --location --retry 3 --output '.browser-cache/${{ matrix.archive }}' '${{ matrix.url }}'
+      - name: Install, launch, and extract a controlled page
+        shell: bash
+        env:
+          KG2BB_TEST_BROWSER_ARCHIVE: .browser-cache/${{ matrix.archive }}
+        run: go test -count=1 -tags=browser_install ./internal/browser -run TestPinnedArchiveInstallLaunchAndExtraction -v
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, build, browser-smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes
