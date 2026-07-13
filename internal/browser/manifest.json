@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "artifacts": {
+    "darwin/arm64": {
+      "revision": 1321438,
+      "url": "https://storage.googleapis.com/chromium-browser-snapshots/Mac_Arm/1321438/chrome-mac.zip",
+      "sha256": "",
+      "executable": "chrome-mac/Chromium.app/Contents/MacOS/Chromium"
+    },
+    "darwin/amd64": {
+      "revision": 1321438,
+      "url": "https://storage.googleapis.com/chromium-browser-snapshots/Mac/1321438/chrome-mac.zip",
+      "sha256": "",
+      "executable": "chrome-mac/Chromium.app/Contents/MacOS/Chromium"
+    },
+    "windows/amd64": {
+      "revision": 1321438,
+      "url": "https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/1321438/chrome-win.zip",
+      "sha256": "",
+      "executable": "chrome-win/chrome.exe"
+    },
+    "linux/amd64": {
+      "revision": 1321438,
+      "url": "https://storage.googleapis.com/chromium-browser-snapshots/Linux_x64/1321438/chrome-linux.zip",
+      "sha256": "",
+      "executable": "chrome-linux/chrome"
+    }
+  }
+}
