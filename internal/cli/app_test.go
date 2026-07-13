@@ -72,10 +72,10 @@ func testApp(backend Backend) (*App, *bytes.Buffer, *bytes.Buffer) {
 	}, out, errOut
 }
 
-func TestCompatibilityAliasAndInterspersedOptions(t *testing.T) {
+func TestConvertInterspersedOptions(t *testing.T) {
 	backend := &fakeBackend{}
 	app, out, errOut := testApp(backend)
-	exit := app.Run(context.Background(), []string{"cli", "https://example.test/list", "--search-pages", "2", "--top-k=5", "--workers", "3", "--favorite", "target", "--yes", "--no-qr-login"})
+	exit := app.Run(context.Background(), []string{"convert", "https://example.test/list", "--search-pages", "2", "--top-k=5", "--workers", "3", "--favorite", "target", "--yes", "--no-qr-login"})
 	if exit != ExitSuccess {
 		t.Fatalf("exit = %d, stderr=%s", exit, errOut.String())
 	}
@@ -87,6 +87,17 @@ func TestCompatibilityAliasAndInterspersedOptions(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "成功: 1") {
 		t.Fatalf("output = %q", out.String())
+	}
+}
+
+func TestCLISubcommandIsUnknown(t *testing.T) {
+	app, _, errOut := testApp(&fakeBackend{})
+	exit := app.Run(context.Background(), []string{"cli", "https://example.test/list"})
+	if exit != ExitInvalidInput {
+		t.Fatalf("exit = %d, want %d", exit, ExitInvalidInput)
+	}
+	if !strings.Contains(errOut.String(), "未知命令: cli") {
+		t.Fatalf("stderr = %q", errOut.String())
 	}
 }
 

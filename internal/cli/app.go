@@ -54,9 +54,6 @@ func (a *App) Run(ctx context.Context, args []string) int {
 	}
 	command := args[0]
 	commandArgs := args[1:]
-	if command == "cli" {
-		command = "convert"
-	}
 	switch command {
 	case "convert":
 		return a.runConvert(ctx, commandArgs)
@@ -99,7 +96,6 @@ func (a *App) printHelp() {
 
 用法:
   music2bb convert <kugou-url> [options]
-  music2bb cli <kugou-url> [options]
   music2bb login [--no-qr-login]
   music2bb favorites list
   music2bb favorites create <name> [--intro TEXT] [--private]

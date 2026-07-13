@@ -36,7 +36,6 @@ go build -trimpath -o music2bb ./cmd/music2bb
 
 ```text
 music2bb convert <kugou-url> [options]
-music2bb cli <kugou-url> [options]
 music2bb login
 music2bb favorites list
 music2bb favorites create <name> [--intro TEXT] [--private]
@@ -79,7 +78,7 @@ music2bb convert '<kugou-url>' --top-k 5 --manual-review
 | `--config-dir` | 系统目录 | 指定便携配置目录 |
 | `--verbose`, `-v` | `false` | 输出详细进度 |
 
-`music2bb cli <url>` 保留为 `convert` 的兼容别名。非交互式写入需要同时指定 `--favorite` 和 `--yes`。
+非交互式写入需要同时指定 `--favorite` 和 `--yes`。
 
 ## Chromium 回退
 
