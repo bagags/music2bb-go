@@ -196,3 +196,35 @@ func (s Song) AllSearchKeywords() []string {
 	}
 	return keywords
 }
+
+// ArtistKeywords returns the cleaned source artist and known aliases that can
+// be used as independent evidence when deciding whether an automatic match is
+// safe. The order is deterministic and duplicates are removed.
+func (s Song) ArtistKeywords() []string {
+	artist := s.CleanArtist()
+	keywords := make([]string, 0, 5)
+	if artist != "" {
+		keywords = append(keywords, artist)
+	}
+	for _, entry := range artistAliases {
+		if strings.Contains(s.Artist, entry.needle) || strings.Contains(artist, entry.needle) {
+			keywords = append(keywords, entry.aliases...)
+			break
+		}
+	}
+	result := make([]string, 0, len(keywords))
+	seen := make(map[string]struct{}, len(keywords))
+	for _, keyword := range keywords {
+		keyword = strings.TrimSpace(keyword)
+		if keyword == "" {
+			continue
+		}
+		key := strings.ToLower(keyword)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, keyword)
+	}
+	return result
+}

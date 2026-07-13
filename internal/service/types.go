@@ -61,6 +61,7 @@ type MatchOutcome struct {
 	Candidates     []model.MatchResult
 	Failure        *ItemFailure
 	ManualOverride bool
+	NeedsReview    bool
 }
 
 type CreateFavoriteRequest struct {

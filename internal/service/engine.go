@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/gguage/music-to-bb/internal/model"
 )
@@ -103,6 +104,12 @@ func (e *Engine) Match(ctx context.Context, songs []model.Song, opts MatchOption
 					outcome.Failure.Index = index
 				}
 				outcomes[index] = outcome
+				if outcome.NeedsReview {
+					updates.emit(ProgressEvent{
+						Kind: EventWarning, Operation: "match", Current: index + 1, Total: len(songs), Song: &outcomes[index].Song,
+						Message: fmt.Sprintf("警告：%s 缺少可靠歌手证据，需要人工审核，未自动选择", songs[index].Name),
+					})
+				}
 				event := ProgressEvent{Kind: EventSong, Operation: "match", Current: index + 1, Total: len(songs), Song: &outcomes[index].Song}
 				if outcome.HasSelection {
 					event.Match = &outcomes[index].Selected
@@ -148,10 +155,15 @@ func (e *Engine) matchSong(ctx context.Context, song model.Song, opts MatchOptio
 	if len(queries) == 0 || queries[0] != primary {
 		queries = append([]string{primary}, queries...)
 	}
+	// A plain-title query is the final fallback. Even when it returns a high
+	// score, it is never auto-selected because same-name songs are common.
+	queries = append(queries, song.SearchKeyword())
 	queries = uniqueStrings(queries)
 	allVideos := make([]model.Video, 0)
 	seenVideos := make(map[string]struct{})
+	reviewCandidateFound := false
 	for _, query := range queries {
+		titleOnly := query == song.SearchKeyword()
 		videos := make([]model.Video, 0, opts.SearchPages*20)
 		for page := 1; page <= opts.SearchPages; page++ {
 			pageVideos, err := e.match.SearchVideos(ctx, query, page, 20)
@@ -175,8 +187,18 @@ func (e *Engine) matchSong(ctx context.Context, song model.Song, opts MatchOptio
 			}
 		}
 		candidates := e.matcher.Match(song, videos, opts.TopK)
-		if len(candidates) > 0 && candidates[0].Matched {
-			outcome.Selected = candidates[0]
+		if titleOnly && len(candidates) > 0 {
+			reviewCandidateFound = true
+		}
+		for _, candidate := range candidates {
+			if !candidate.Matched {
+				continue
+			}
+			reviewCandidateFound = true
+			if titleOnly || candidate.Video == nil || !hasArtistEvidence(song, *candidate.Video) {
+				continue
+			}
+			outcome.Selected = candidate
 			outcome.HasSelection = true
 			outcome.Candidates = append([]model.MatchResult(nil), candidates...)
 			return outcome
@@ -185,6 +207,7 @@ func (e *Engine) matchSong(ctx context.Context, song model.Song, opts MatchOptio
 	// Preserve useful review candidates even when the automatic threshold was
 	// not reached. The selected field remains empty.
 	outcome.Candidates = e.matcher.Match(song, allVideos, opts.TopK)
+	outcome.NeedsReview = reviewCandidateFound
 	return outcome
 }
 
@@ -289,4 +312,28 @@ func uniqueStrings(values []string) []string {
 		result = append(result, value)
 	}
 	return result
+}
+
+func hasArtistEvidence(song model.Song, video model.Video) bool {
+	artistKeywords := song.ArtistKeywords()
+	if len(artistKeywords) == 0 {
+		return false
+	}
+	evidence := normalizeEvidence(video.Title + " " + video.Uploader)
+	for _, keyword := range artistKeywords {
+		normalized := normalizeEvidence(keyword)
+		if len([]rune(normalized)) >= 2 && strings.Contains(evidence, normalized) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeEvidence(value string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) {
+			return unicode.ToLower(r)
+		}
+		return -1
+	}, value)
 }

@@ -12,6 +12,12 @@ type Song struct {
 
 func (s Song) SearchKeyword() string { return songToInternal(s).SearchKeyword() }
 
+func (s Song) SearchKeywordFull() string { return songToInternal(s).SearchKeywordFull() }
+
+func (s Song) AllSearchKeywords() []string {
+	return append([]string(nil), songToInternal(s).AllSearchKeywords()...)
+}
+
 type Video struct {
 	BVID          string
 	AID           int64
@@ -43,6 +49,7 @@ type MatchResult struct {
 	Matched         bool
 	HasSelection    bool
 	ManualOverride  bool
+	NeedsReview     bool
 	Candidates      []MatchResult
 	Failure         *ItemFailure
 }

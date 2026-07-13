@@ -82,6 +82,23 @@ func (fakeMatcher) Match(song model.Song, videos []model.Video, topK int) []mode
 	return results
 }
 
+type scriptedSearch struct {
+	mu      sync.Mutex
+	queries []string
+	results map[string][]model.Video
+}
+
+func (s *scriptedSearch) SearchVideos(_ context.Context, keyword string, _, _ int) ([]model.Video, error) {
+	s.mu.Lock()
+	s.queries = append(s.queries, keyword)
+	s.mu.Unlock()
+	return append([]model.Video(nil), s.results[keyword]...), nil
+}
+
+func (s *scriptedSearch) VideoDetail(context.Context, string) (model.Video, error) {
+	return model.Video{}, nil
+}
+
 func newTestEngine(t *testing.T, remote *fakeRemote) *Engine {
 	t.Helper()
 	engine, err := New(Dependencies{
@@ -117,6 +134,69 @@ func TestMatchBoundsWorkersAndPreservesOrder(t *testing.T) {
 		if len(outcome.Candidates) != 1 || !outcome.HasSelection {
 			t.Fatalf("outcome %d did not retain/select candidates: %#v", index, outcome)
 		}
+	}
+}
+
+func TestMatchUsesArtistQueryThenQueuesTitleFallbackForReview(t *testing.T) {
+	search := &scriptedSearch{results: map[string][]model.Video{
+		"Shared Song Right Artist": {{BVID: "wrong", Title: "Shared Song", Uploader: "Other Artist"}},
+		"Shared Song":              {{BVID: "right", Title: "Shared Song", Uploader: "Right Artist"}},
+	}}
+	account := &fakeRemote{}
+	engine, err := New(Dependencies{Playlist: fakePlaylist{}, Match: search, Account: account, Matcher: fakeMatcher{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcomes, err := engine.Match(context.Background(), []model.Song{{Name: "Shared Song", Artist: "Right Artist"}}, MatchOptions{Workers: 1, SearchPages: 1, TopK: 3}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(outcomes) != 1 || outcomes[0].HasSelection || !outcomes[0].NeedsReview {
+		t.Fatalf("unsafe fallback outcome = %#v", outcomes)
+	}
+	search.mu.Lock()
+	defer search.mu.Unlock()
+	want := []string{"Shared Song Right Artist", "Shared Song"}
+	if fmt.Sprint(search.queries) != fmt.Sprint(want) {
+		t.Fatalf("queries = %#v, want %#v", search.queries, want)
+	}
+}
+
+func TestMatchAutoSelectsOnlyWithArtistEvidence(t *testing.T) {
+	search := &scriptedSearch{results: map[string][]model.Video{
+		"Shared Song Right Artist": {{BVID: "right", Title: "Shared Song - Right Artist", Uploader: "music"}},
+	}}
+	account := &fakeRemote{}
+	engine, err := New(Dependencies{Playlist: fakePlaylist{}, Match: search, Account: account, Matcher: fakeMatcher{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcomes, err := engine.Match(context.Background(), []model.Song{{Name: "Shared Song", Artist: "Right Artist"}}, MatchOptions{Workers: 1, SearchPages: 1}, nil)
+	if err != nil || len(outcomes) != 1 || !outcomes[0].HasSelection || outcomes[0].NeedsReview {
+		t.Fatalf("safe outcome = %#v, %v", outcomes, err)
+	}
+}
+
+func TestMatchWithoutArtistAlwaysNeedsReview(t *testing.T) {
+	search := &scriptedSearch{results: map[string][]model.Video{
+		"Mystery": {{BVID: "candidate", Title: "Mystery", Uploader: "unknown"}},
+	}}
+	account := &fakeRemote{}
+	engine, err := New(Dependencies{Playlist: fakePlaylist{}, Match: search, Account: account, Matcher: fakeMatcher{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var warned bool
+	outcomes, err := engine.Match(context.Background(), []model.Song{{Name: "Mystery"}}, MatchOptions{Workers: 1, SearchPages: 1}, ObserverFunc(func(event ProgressEvent) {
+		if event.Kind == EventWarning {
+			warned = true
+		}
+	}))
+	if err != nil || len(outcomes) != 1 || outcomes[0].HasSelection || !outcomes[0].NeedsReview {
+		t.Fatalf("artistless outcome = %#v, %v", outcomes, err)
+	}
+	if !warned {
+		t.Fatal("artistless outcome did not emit a warning")
 	}
 }
 
@@ -164,7 +244,10 @@ func TestMatchSerializesObserver(t *testing.T) {
 		eventsMu.Unlock()
 		inside.Add(-1)
 	})
-	songs := []model.Song{{Name: "a"}, {Name: "b"}, {Name: "c"}, {Name: "d"}}
+	songs := []model.Song{
+		{Name: "a", Artist: "artist"}, {Name: "b", Artist: "artist"},
+		{Name: "c", Artist: "artist"}, {Name: "d", Artist: "artist"},
+	}
 	if _, err := engine.Match(context.Background(), songs, MatchOptions{Workers: 4, SearchPages: 1}, observer); err != nil {
 		t.Fatal(err)
 	}

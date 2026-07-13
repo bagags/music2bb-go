@@ -92,6 +92,7 @@ func outcomesFromInternal(outcomes []service.MatchOutcome) []MatchResult {
 		converted.Song = songFromInternal(outcome.Song)
 		converted.HasSelection = outcome.HasSelection
 		converted.ManualOverride = outcome.ManualOverride || converted.ManualOverride
+		converted.NeedsReview = outcome.NeedsReview
 		converted.Candidates = candidatesFromInternal(outcome.Candidates)
 		if outcome.Failure != nil {
 			converted.Failure = &ItemFailure{Index: outcome.Failure.Index, Operation: outcome.Failure.Operation, Item: outcome.Failure.Item, Reason: outcome.Failure.Reason}
@@ -106,6 +107,7 @@ func outcomeToInternal(match MatchResult) service.MatchOutcome {
 	outcome := service.MatchOutcome{
 		Song: songToInternal(match.Song), Selected: candidate,
 		HasSelection: match.HasSelection, ManualOverride: match.ManualOverride,
+		NeedsReview: match.NeedsReview,
 	}
 	if match.Failure != nil {
 		outcome.Failure = &service.ItemFailure{Index: match.Failure.Index, Operation: match.Failure.Operation, Item: match.Failure.Item, Reason: match.Failure.Reason}
