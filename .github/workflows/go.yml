@@ -31,50 +31,58 @@ jobs:
       - run: go test -run '^$' -tags='live authenticated browser_install' ./...
 
   build:
+    needs: browser-smoke
     runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
           - goos: darwin
             goarch: arm64
+            platform: darwin/arm64
             output: music2bb-darwin-arm64
-            browser_url: https://storage.googleapis.com/chromium-browser-snapshots/Mac_Arm/1321438/chrome-mac.zip
-            browser_sha256: 4a478b542f1f6eaa160e64aab76100501e061d3bba46f6a480897ef1103c70c5
           - goos: darwin
             goarch: amd64
+            platform: darwin/amd64
             output: music2bb-darwin-amd64
-            browser_url: https://storage.googleapis.com/chromium-browser-snapshots/Mac/1321438/chrome-mac.zip
-            browser_sha256: b25cd79dc73ebf423b05a4a0d65f772a78e3b87d394e9a2e7d0a4cc9201bda7b
           - goos: windows
             goarch: amd64
+            platform: windows/amd64
             output: music2bb-windows-amd64.exe
-            browser_url: https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/1321438/chrome-win.zip
-            browser_sha256: f8ddee43d6865a974fc8acfcfcb9f6a42e84aadc427482ae2fa2e6a36a413454
           - goos: windows
             goarch: arm64
+            platform: windows/arm64
             output: music2bb-windows-arm64.exe
-            browser_url: https://storage.googleapis.com/chromium-browser-snapshots/Win_Arm64/1321438/chrome-win.zip
-            browser_sha256: 3f429a89d4da66117f8edda67b1a78cfc9fe7323415d969d74badaf162d4f61e
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.x"
           cache: true
+      - name: Resolve pinned Chromium provenance
+        id: chromium
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          node -e 'const fs=require("fs"),a=require("./internal/browser/manifest.json").artifacts[process.env.PLATFORM]; for (const [k,v] of Object.entries({url:a.archive_url,sha256:a.sha256,revision:a.revision,version:a.chromium_version,commit:a.chromium_commit})) fs.appendFileSync(process.env.GITHUB_OUTPUT, `${k}=${v}\n`)'
       - uses: actions/cache@v4
         id: bundled-browser-cache
         with:
           path: internal/browser/chromium.zip
-          key: bundled-chromium-1321438-${{ matrix.goos }}-${{ matrix.goarch }}
+          key: bundled-chromium-${{ steps.chromium.outputs.revision }}-${{ matrix.goos }}-${{ matrix.goarch }}
       - name: Download bundled Chromium
         if: steps.bundled-browser-cache.outputs.cache-hit != 'true'
         env:
-          BROWSER_URL: ${{ matrix.browser_url }}
+          BROWSER_URL: ${{ steps.chromium.outputs.url }}
         run: curl --fail --location --retry 3 --output internal/browser/chromium.zip "$BROWSER_URL"
       - name: Verify bundled Chromium
         env:
-          BROWSER_SHA256: ${{ matrix.browser_sha256 }}
+          BROWSER_SHA256: ${{ steps.chromium.outputs.sha256 }}
         run: echo "$BROWSER_SHA256  internal/browser/chromium.zip" | sha256sum --check
+      - uses: actions/download-artifact@v4
+        with:
+          name: chromium-credits-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: .chromium-credits
       - name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
         env:
           CGO_ENABLED: "0"
@@ -87,7 +95,9 @@ jobs:
           mkdir -p "dist/${PACKAGE}"
           BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           go build -trimpath -tags=bundled_chromium -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${GITHUB_SHA} -X main.date=${BUILD_DATE}" -o "dist/${PACKAGE}/${OUTPUT}" ./cmd/music2bb
-          cp LICENSE.md THIRD_PARTY_NOTICES.md "dist/${PACKAGE}/"
+          cp LICENSE.md THIRD_PARTY_NOTICES.md CHROMIUM_PROVENANCE.md "dist/${PACKAGE}/"
+          cp internal/browser/manifest.json "dist/${PACKAGE}/CHROMIUM_PROVENANCE.json"
+          cp .chromium-credits/CHROMIUM_CREDITS.html "dist/${PACKAGE}/"
           printf '%s\n' \
             "music2bb ${VERSION}" \
             "Commit: ${GITHUB_SHA}" \
@@ -119,14 +129,25 @@ jobs:
       matrix:
         include:
           - os: macos-15
+            goos: darwin
+            goarch: arm64
+            platform: darwin/arm64
             archive: chromium-darwin-arm64.zip
-            url: https://storage.googleapis.com/chromium-browser-snapshots/Mac_Arm/1321438/chrome-mac.zip
+          - os: macos-15-intel
+            goos: darwin
+            goarch: amd64
+            platform: darwin/amd64
+            archive: chromium-darwin-amd64.zip
           - os: windows-latest
+            goos: windows
+            goarch: amd64
+            platform: windows/amd64
             archive: chromium-windows-amd64.zip
-            url: https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/1321438/chrome-win.zip
           - os: windows-11-arm
+            goos: windows
+            goarch: arm64
+            platform: windows/arm64
             archive: chromium-windows-arm64.zip
-            url: https://storage.googleapis.com/chromium-browser-snapshots/Win_Arm64/1321438/chrome-win.zip
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -134,22 +155,47 @@ jobs:
         with:
           go-version: "1.26.x"
           cache: true
+      - name: Resolve pinned Chromium provenance
+        id: chromium
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          node -e 'const fs=require("fs"),a=require("./internal/browser/manifest.json").artifacts[process.env.PLATFORM]; for (const [k,v] of Object.entries({url:a.archive_url,revision:a.revision,executable:a.executable})) fs.appendFileSync(process.env.GITHUB_OUTPUT, `${k}=${v}\n`)'
       - uses: actions/cache@v4
         id: browser-cache
         with:
           path: .browser-cache/${{ matrix.archive }}
-          key: chromium-1321438-${{ matrix.os }}
+          key: chromium-${{ steps.chromium.outputs.revision }}-${{ matrix.os }}
       - name: Download pinned Chromium
         if: steps.browser-cache.outputs.cache-hit != 'true'
         shell: bash
+        env:
+          BROWSER_URL: ${{ steps.chromium.outputs.url }}
         run: |
           mkdir -p .browser-cache
-          curl --fail --location --retry 3 --output '.browser-cache/${{ matrix.archive }}' '${{ matrix.url }}'
+          curl --fail --location --retry 3 --output '.browser-cache/${{ matrix.archive }}' "$BROWSER_URL"
       - name: Install, launch, and extract a controlled page
         shell: bash
         env:
           MUSIC2BB_TEST_BROWSER_ARCHIVE: ${{ github.workspace }}/.browser-cache/${{ matrix.archive }}
         run: go test -count=1 -tags=browser_install ./internal/browser -run TestPinnedArchiveInstallLaunchAndExtraction -v
+      - name: Export complete Chromium credits
+        shell: bash
+        env:
+          CHROMIUM_EXECUTABLE: ${{ steps.chromium.outputs.executable }}
+        run: |
+          mkdir -p .browser-cache/extracted artifacts
+          unzip -q '.browser-cache/${{ matrix.archive }}' -d .browser-cache/extracted
+          '.browser-cache/extracted/'"$CHROMIUM_EXECUTABLE" --headless=new --no-sandbox --disable-gpu --user-data-dir="$RUNNER_TEMP/chromium-credits" --dump-dom chrome://credits > artifacts/CHROMIUM_CREDITS.html
+          test "$(wc -c < artifacts/CHROMIUM_CREDITS.html)" -gt 100000
+          grep -Fq 'The Chromium Project' artifacts/CHROMIUM_CREDITS.html
+          grep -Fq 'Redistribution and use in source and binary forms' artifacts/CHROMIUM_CREDITS.html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chromium-credits-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: artifacts/CHROMIUM_CREDITS.html
+          if-no-files-found: error
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -158,9 +204,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: music2bb-*
           merge-multiple: true
       - name: Publish release assets
         env:
