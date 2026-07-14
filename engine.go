@@ -5,11 +5,11 @@ import (
 	"errors"
 	"time"
 
-	"github.com/gguage/music-to-bb/internal/bilibili"
-	"github.com/gguage/music-to-bb/internal/config"
-	"github.com/gguage/music-to-bb/internal/playlist"
-	"github.com/gguage/music-to-bb/internal/service"
-	"github.com/gguage/music-to-bb/internal/wiring"
+	"github.com/bagags/music2bb-go/internal/bilibili"
+	"github.com/bagags/music2bb-go/internal/config"
+	"github.com/bagags/music2bb-go/internal/playlist"
+	"github.com/bagags/music2bb-go/internal/service"
+	"github.com/bagags/music2bb-go/internal/wiring"
 )
 
 type Engine struct {

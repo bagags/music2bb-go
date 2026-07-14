@@ -3,7 +3,7 @@ package kugou
 import (
 	"strings"
 
-	"github.com/gguage/music-to-bb/internal/model"
+	"github.com/bagags/music2bb-go/internal/model"
 )
 
 // CleanupSongs removes browser phantom entries and exact duplicates while

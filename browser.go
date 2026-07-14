@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/gguage/music-to-bb/internal/browser"
+	"github.com/bagags/music2bb-go/internal/browser"
 )
 
 type BrowserStatus struct {

@@ -28,7 +28,7 @@ func TestCLIBackendImportsOnlyPublicAPI(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if strings.HasPrefix(path, "github.com/gguage/music-to-bb/internal/") {
+			if strings.HasPrefix(path, "github.com/bagags/music2bb-go/internal/") {
 				t.Errorf("%s directly imports internal backend package %s", entry.Name(), path)
 			}
 		}

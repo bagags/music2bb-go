@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/gguage/music-to-bb/internal/model"
+	"github.com/bagags/music2bb-go/internal/model"
 )
 
 func TestComputeKeywordScore(t *testing.T) {

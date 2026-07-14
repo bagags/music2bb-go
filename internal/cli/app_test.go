@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	music2bb "github.com/gguage/music-to-bb"
+	music2bb "github.com/bagags/music2bb-go"
 )
 
 type fakeBackend struct {

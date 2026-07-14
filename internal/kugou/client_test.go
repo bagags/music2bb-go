@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gguage/music-to-bb/internal/model"
-	"github.com/gguage/music-to-bb/internal/netx"
-	"github.com/gguage/music-to-bb/internal/playlist"
+	"github.com/bagags/music2bb-go/internal/model"
+	"github.com/bagags/music2bb-go/internal/netx"
+	"github.com/bagags/music2bb-go/internal/playlist"
 )
 
 func TestParsePlaylistUsesResolvedIDAndFixedEndpointOrder(t *testing.T) {

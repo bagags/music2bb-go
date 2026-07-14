@@ -9,16 +9,16 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/gguage/music-to-bb/internal/applemusic"
-	"github.com/gguage/music-to-bb/internal/bilibili"
-	"github.com/gguage/music-to-bb/internal/browser"
-	"github.com/gguage/music-to-bb/internal/config"
-	"github.com/gguage/music-to-bb/internal/kugou"
-	"github.com/gguage/music-to-bb/internal/matcher"
-	"github.com/gguage/music-to-bb/internal/model"
-	"github.com/gguage/music-to-bb/internal/netx"
-	"github.com/gguage/music-to-bb/internal/playlist"
-	"github.com/gguage/music-to-bb/internal/service"
+	"github.com/bagags/music2bb-go/internal/applemusic"
+	"github.com/bagags/music2bb-go/internal/bilibili"
+	"github.com/bagags/music2bb-go/internal/browser"
+	"github.com/bagags/music2bb-go/internal/config"
+	"github.com/bagags/music2bb-go/internal/kugou"
+	"github.com/bagags/music2bb-go/internal/matcher"
+	"github.com/bagags/music2bb-go/internal/model"
+	"github.com/bagags/music2bb-go/internal/netx"
+	"github.com/bagags/music2bb-go/internal/playlist"
+	"github.com/bagags/music2bb-go/internal/service"
 )
 
 type Options struct {

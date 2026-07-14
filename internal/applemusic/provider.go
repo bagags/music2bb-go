@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/gguage/music-to-bb/internal/playlist"
+	"github.com/bagags/music2bb-go/internal/playlist"
 )
 
 // ProviderID joins Apple Music URL identification to its independently

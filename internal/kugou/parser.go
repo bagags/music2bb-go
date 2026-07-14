@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gguage/music-to-bb/internal/model"
-	"github.com/gguage/music-to-bb/internal/playlist"
+	"github.com/bagags/music2bb-go/internal/model"
+	"github.com/bagags/music2bb-go/internal/playlist"
 )
 
 var jsonScriptPattern = regexp.MustCompile(`(?is)<script[^>]*(?:application/json|__NEXT_DATA__)[^>]*>(.*?)</script>`)

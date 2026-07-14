@@ -3,7 +3,7 @@ package cli
 import (
 	"errors"
 
-	music2bb "github.com/gguage/music-to-bb"
+	music2bb "github.com/bagags/music2bb-go"
 )
 
 const (

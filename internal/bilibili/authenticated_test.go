@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gguage/music-to-bb/internal/model"
+	"github.com/bagags/music2bb-go/internal/model"
 )
 
 // This destructive canary is doubly opt-in: it requires the authenticated

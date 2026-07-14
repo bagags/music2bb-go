@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gguage/music-to-bb/internal/model"
+	"github.com/bagags/music2bb-go/internal/model"
 )
 
 type favoriteListData struct {

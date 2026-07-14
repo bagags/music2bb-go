@@ -10,9 +10,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/gguage/music-to-bb/internal/kugou"
-	"github.com/gguage/music-to-bb/internal/matcher"
-	"github.com/gguage/music-to-bb/internal/model"
+	"github.com/bagags/music2bb-go/internal/kugou"
+	"github.com/bagags/music2bb-go/internal/matcher"
+	"github.com/bagags/music2bb-go/internal/model"
 )
 
 type goldenFixture struct {

@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/gguage/music-to-bb/internal/model"
+	"github.com/bagags/music2bb-go/internal/model"
 )
 
 // ProviderID joins provider identification to independently registered

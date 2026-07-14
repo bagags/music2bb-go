@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gguage/music-to-bb/internal/netx"
+	"github.com/bagags/music2bb-go/internal/netx"
 )
 
 var ErrNoCookieFile = errors.New("bilibili: cookie file does not exist")

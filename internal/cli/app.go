@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	music2bb "github.com/gguage/music-to-bb"
+	music2bb "github.com/bagags/music2bb-go"
 	qrcode "github.com/skip2/go-qrcode"
 )
 

@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/gguage/music-to-bb/internal/config"
-	"github.com/gguage/music-to-bb/internal/service"
+	"github.com/bagags/music2bb-go/internal/config"
+	"github.com/bagags/music2bb-go/internal/service"
 )
 
 func TestNewBuildsProductionGraphWithoutNetwork(t *testing.T) {

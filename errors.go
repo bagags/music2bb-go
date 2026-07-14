@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/gguage/music-to-bb/internal/service"
+	"github.com/bagags/music2bb-go/internal/service"
 )
 
 type ErrorCategory string

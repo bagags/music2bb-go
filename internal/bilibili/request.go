@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gguage/music-to-bb/internal/netx"
+	"github.com/bagags/music2bb-go/internal/netx"
 )
 
 type apiEnvelope struct {

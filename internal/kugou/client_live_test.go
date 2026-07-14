@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gguage/music-to-bb/internal/netx"
+	"github.com/bagags/music2bb-go/internal/netx"
 )
 
 func TestLiveDirectExtraction(t *testing.T) {

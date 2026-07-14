@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gguage/music-to-bb/internal/netx"
-	"github.com/gguage/music-to-bb/internal/playlist"
+	"github.com/bagags/music2bb-go/internal/netx"
+	"github.com/bagags/music2bb-go/internal/playlist"
 )
 
 const maxResponseBytes int64 = 16 << 20

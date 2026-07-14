@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gguage/music-to-bb/internal/playlist"
+	"github.com/bagags/music2bb-go/internal/playlist"
 )
 
 // This opt-in smoke test uses an existing verified browser by default. Setting

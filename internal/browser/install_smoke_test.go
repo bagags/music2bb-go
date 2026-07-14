@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gguage/music-to-bb/internal/playlist"
+	"github.com/bagags/music2bb-go/internal/playlist"
 )
 
 func TestPinnedArchiveInstallLaunchAndExtraction(t *testing.T) {

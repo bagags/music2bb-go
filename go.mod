@@ -1,4 +1,4 @@
-module github.com/gguage/music-to-bb
+module github.com/bagags/music2bb-go
 
 go 1.26
 

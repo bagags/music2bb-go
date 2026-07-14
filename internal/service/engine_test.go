@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gguage/music-to-bb/internal/model"
+	"github.com/bagags/music2bb-go/internal/model"
 )
 
 type fakePlaylist struct {

@@ -6,8 +6,8 @@ import (
 	"os"
 	"os/signal"
 
-	music2bb "github.com/gguage/music-to-bb"
-	"github.com/gguage/music-to-bb/internal/cli"
+	music2bb "github.com/bagags/music2bb-go"
+	"github.com/bagags/music2bb-go/internal/cli"
 	"golang.org/x/term"
 )
 

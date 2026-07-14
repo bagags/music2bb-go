@@ -16,16 +16,16 @@
 
 ## 安装
 
-从 [GitHub Releases](https://github.com/gguage/music-to-bb/releases) 下载与平台对应的压缩包，并使用随附的 `.sha256` 文件校验。压缩包包含已集成对应平台 Chromium 的单文件程序、GPLv3 许可证、第三方软件声明和对应源码信息。也可以直接安装当前源码：
+从 [GitHub Releases](https://github.com/bagags/music2bb-go/releases) 下载与平台对应的压缩包，并使用随附的 `.sha256` 文件校验。压缩包包含已集成对应平台 Chromium 的单文件程序、GPLv3 许可证、第三方软件声明和对应源码信息。也可以直接安装当前源码：
 
 ```bash
-go install github.com/gguage/music-to-bb/cmd/music2bb@latest
+go install github.com/bagags/music2bb-go/cmd/music2bb@latest
 ```
 
 本地构建：
 
 ```bash
-git clone https://github.com/gguage/music-to-bb.git music2bb
+git clone https://github.com/bagags/music2bb-go.git music2bb
 cd music2bb
 go build -trimpath -o music2bb ./cmd/music2bb
 ```
@@ -125,7 +125,7 @@ music2bb browser clear
 CLI 只通过公共包调用后端：
 
 ```go
-import music2bb "github.com/gguage/music-to-bb"
+import music2bb "github.com/bagags/music2bb-go"
 
 engine, err := music2bb.New(music2bb.Config{})
 if err != nil {

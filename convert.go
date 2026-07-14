@@ -1,8 +1,8 @@
 package music2bb
 
 import (
-	"github.com/gguage/music-to-bb/internal/model"
-	"github.com/gguage/music-to-bb/internal/service"
+	"github.com/bagags/music2bb-go/internal/model"
+	"github.com/bagags/music2bb-go/internal/service"
 )
 
 func songFromInternal(song model.Song) Song {

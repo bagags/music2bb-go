@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/gguage/music-to-bb/internal/model"
-	"github.com/gguage/music-to-bb/internal/playlist"
+	"github.com/bagags/music2bb-go/internal/model"
+	"github.com/bagags/music2bb-go/internal/playlist"
 )
 
 func TestURLIdentifierMatchesOnlyKugouHostBoundary(t *testing.T) {
