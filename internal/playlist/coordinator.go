@@ -23,10 +23,17 @@ func NewCoordinator(identification *IdentificationRegistry, optimizations *Optim
 
 // ParsePlaylist extracts and decodes one playlist according to browser policy.
 func (c *Coordinator) ParsePlaylist(ctx context.Context, rawURL string, policy BrowserPolicy) (Result, error) {
+	return c.ParsePlaylistWithOptions(ctx, rawURL, ParseOptions{BrowserPolicy: policy})
+}
+
+// ParsePlaylistWithOptions extracts and decodes one playlist and notifies the
+// caller immediately before Chromium is launched as a fallback.
+func (c *Coordinator) ParsePlaylistWithOptions(ctx context.Context, rawURL string, opts ParseOptions) (Result, error) {
 	source, err := ParseSource(rawURL)
 	if err != nil {
 		return Result{}, &Error{Kind: ErrorInvalidInput, Op: "parse URL", Err: err}
 	}
+	policy := opts.BrowserPolicy
 	if policy == "" {
 		policy = BrowserAuto
 	}
@@ -58,6 +65,17 @@ func (c *Coordinator) ParsePlaylist(ctx context.Context, rawURL string, policy B
 			return &Error{Kind: ErrorBrowser, Op: "browser status", Err: availabilityErr}
 		}
 		browserAvailable = available
+		if !browserAvailable {
+			if provisioner, ok := c.browser.(BrowserProvisioner); ok {
+				browserAvailable, availabilityErr = provisioner.EnsureAvailable(ctx)
+				if contextError(ctx, availabilityErr) != nil {
+					return contextError(ctx, availabilityErr)
+				}
+				if availabilityErr != nil {
+					return &Error{Kind: ErrorBrowser, Op: "prepare bundled browser", Err: availabilityErr}
+				}
+			}
+		}
 		return nil
 	}
 	if policy == BrowserAlways {
@@ -132,6 +150,9 @@ func (c *Coordinator) ParsePlaylist(ctx context.Context, rawURL string, policy B
 			return Result{}, extractionError(failures, "provider extraction returned no songs and browser is unavailable")
 		}
 		return Result{}, &Error{Kind: ErrorBrowser, Op: "parse playlist", Message: "verified browser is not installed"}
+	}
+	if opts.OnBrowserFallback != nil {
+		opts.OnBrowserFallback()
 	}
 
 	raw, browserErr := c.browser.ExtractPlaylist(ctx, source)

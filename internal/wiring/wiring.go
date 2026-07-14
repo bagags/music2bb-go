@@ -158,8 +158,10 @@ type playlistAdapter struct {
 	coordinator *playlist.Coordinator
 }
 
-func (a *playlistAdapter) ParsePlaylist(ctx context.Context, rawURL string, policy service.BrowserPolicy) (service.PlaylistResult, error) {
-	result, err := a.coordinator.ParsePlaylist(ctx, rawURL, playlist.BrowserPolicy(policy))
+func (a *playlistAdapter) ParsePlaylist(ctx context.Context, rawURL string, policy service.BrowserPolicy, onBrowserFallback func()) (service.PlaylistResult, error) {
+	result, err := a.coordinator.ParsePlaylistWithOptions(ctx, rawURL, playlist.ParseOptions{
+		BrowserPolicy: playlist.BrowserPolicy(policy), OnBrowserFallback: onBrowserFallback,
+	})
 	converted := service.PlaylistResult{Songs: result.Songs, ExpectedTotal: result.ExpectedTotal}
 	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return converted, err

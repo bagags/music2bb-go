@@ -2,6 +2,7 @@ package browser
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -22,20 +23,22 @@ const maxArchiveBytes int64 = 2 << 30
 // ManagerOptions allows deterministic cache, platform, manifest, and network
 // injection. Production callers normally use NewManager.
 type ManagerOptions struct {
-	CacheDir   string
-	Platform   string
-	Manifest   Manifest
-	HTTPClient *http.Client
+	CacheDir       string
+	Platform       string
+	Manifest       Manifest
+	HTTPClient     *http.Client
+	BundledArchive []byte
 }
 
-// Manager owns the verified, pinned browser cache. It never downloads during
-// Status or Executable; Install is the sole network-mutating operation.
+// Manager owns the verified, pinned browser cache. Status and Executable are
+// read-only; Install is the sole network-mutating operation.
 type Manager struct {
-	cacheDir string
-	platform string
-	manifest Manifest
-	http     *http.Client
-	mu       sync.Mutex
+	cacheDir       string
+	platform       string
+	manifest       Manifest
+	http           *http.Client
+	bundledArchive []byte
+	mu             sync.Mutex
 }
 
 // Status describes both physical presence and cryptographic verification.
@@ -51,6 +54,7 @@ type Status struct {
 	Present          bool
 	Installed        bool
 	Verified         bool
+	Bundled          bool
 }
 
 // InstallOptions separates a user's explicit approval from whether a prompt
@@ -83,7 +87,9 @@ func NewManager(cacheDir string) (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewManagerWithOptions(ManagerOptions{CacheDir: cacheDir, Manifest: manifest})
+	return NewManagerWithOptions(ManagerOptions{
+		CacheDir: cacheDir, Manifest: manifest, BundledArchive: compiledChromiumArchive,
+	})
 }
 
 func NewManagerWithOptions(opts ManagerOptions) (*Manager, error) {
@@ -110,7 +116,10 @@ func NewManagerWithOptions(opts ManagerOptions) (*Manager, error) {
 	if opts.Manifest.Artifacts == nil {
 		return nil, errors.New("browser manifest has no artifacts")
 	}
-	return &Manager{cacheDir: filepath.Clean(cacheDir), platform: platform, manifest: opts.Manifest, http: client}, nil
+	return &Manager{
+		cacheDir: filepath.Clean(cacheDir), platform: platform, manifest: opts.Manifest,
+		http: client, bundledArchive: opts.BundledArchive,
+	}, nil
 }
 
 func (m *Manager) artifact() (Artifact, error) {
@@ -146,6 +155,7 @@ func (m *Manager) Status(ctx context.Context) (Status, error) {
 		ApproxBytes:    artifact.ApproxBytes,
 		ExecutablePath: m.executablePath(artifact),
 		ExpectedSHA256: strings.ToLower(artifact.SHA256),
+		Bundled:        len(m.bundledArchive) > 0,
 	}
 	if _, err := os.Stat(status.ExecutablePath); err == nil {
 		status.Present = true
@@ -196,7 +206,8 @@ func (m *Manager) Executable(ctx context.Context) (string, error) {
 	return status.ExecutablePath, nil
 }
 
-// Install downloads, hashes, and only then extracts the pinned archive.
+// Install verifies and extracts the bundled archive when present, otherwise it
+// downloads and verifies the pinned archive before extraction.
 func (m *Manager) Install(ctx context.Context, opts InstallOptions) (Status, error) {
 	if err := ctx.Err(); err != nil {
 		return Status{}, err
@@ -206,8 +217,24 @@ func (m *Manager) Install(ctx context.Context, opts InstallOptions) (Status, err
 		if opts.NonInteractive {
 			kind = ErrorNonInteractive
 		}
-		return Status{}, &Error{Kind: kind, Op: "install", Err: errors.New("browser download requires explicit approval")}
+		return Status{}, &Error{Kind: kind, Op: "install", Err: errors.New("browser installation requires explicit approval")}
 	}
+	return m.install(ctx)
+}
+
+// ensureBundledInstalled installs the compiled-in archive without prompting.
+// It never downloads; a development build without a bundled archive reports
+// that automatic provisioning is unavailable.
+func (m *Manager) ensureBundledInstalled(ctx context.Context) (Status, bool, error) {
+	if len(m.bundledArchive) == 0 {
+		status, err := m.Status(ctx)
+		return status, false, err
+	}
+	status, err := m.install(ctx)
+	return status, true, err
+}
+
+func (m *Manager) install(ctx context.Context) (Status, error) {
 	artifact, err := m.artifact()
 	if err != nil {
 		return Status{}, err
@@ -222,7 +249,7 @@ func (m *Manager) Install(ctx context.Context, opts InstallOptions) (Status, err
 	if !validChecksum(artifact.SHA256) {
 		return Status{}, &Error{Kind: ErrorUnverifiedArtifact, Op: "install", Err: errors.New("embedded archive checksum is absent or a placeholder")}
 	}
-	if artifact.URL == "" {
+	if len(m.bundledArchive) == 0 && artifact.URL == "" {
 		return Status{}, &Error{Kind: ErrorUnverifiedArtifact, Op: "install", Err: errors.New("artifact URL is absent")}
 	}
 	m.mu.Lock()
@@ -234,11 +261,26 @@ func (m *Manager) Install(ctx context.Context, opts InstallOptions) (Status, err
 		return Status{}, &Error{Kind: ErrorInstall, Op: "install", Err: err}
 	}
 
-	archive, actualHash, err := m.download(ctx, artifact)
-	if err != nil {
-		return Status{}, err
+	var actualHash string
+	var extract func(string) error
+	if len(m.bundledArchive) > 0 {
+		if int64(len(m.bundledArchive)) > maxArchiveBytes {
+			return Status{}, &Error{Kind: ErrorInstall, Op: "install bundled archive", Err: fmt.Errorf("archive is larger than %d bytes", maxArchiveBytes)}
+		}
+		sum := sha256.Sum256(m.bundledArchive)
+		actualHash = hex.EncodeToString(sum[:])
+		extract = func(destination string) error {
+			return extractZipBytes(ctx, m.bundledArchive, destination)
+		}
+	} else {
+		archive, downloadedHash, downloadErr := m.download(ctx, artifact)
+		if downloadErr != nil {
+			return Status{}, downloadErr
+		}
+		defer os.Remove(archive)
+		actualHash = downloadedHash
+		extract = func(destination string) error { return extractZip(ctx, archive, destination) }
 	}
-	defer os.Remove(archive)
 	if !strings.EqualFold(actualHash, artifact.SHA256) {
 		return Status{}, &Error{Kind: ErrorChecksumMismatch, Op: "verify", Err: fmt.Errorf("got %s, want %s", actualHash, strings.ToLower(artifact.SHA256))}
 	}
@@ -248,7 +290,7 @@ func (m *Manager) Install(ctx context.Context, opts InstallOptions) (Status, err
 		return Status{}, &Error{Kind: ErrorInstall, Op: "extract", Err: err}
 	}
 	defer os.RemoveAll(tempDir)
-	if err := extractZip(ctx, archive, tempDir); err != nil {
+	if err := extract(tempDir); err != nil {
 		return Status{}, &Error{Kind: ErrorInstall, Op: "extract", Err: err}
 	}
 	tempExecutable := filepath.Join(tempDir, filepath.FromSlash(artifact.Executable))
@@ -420,9 +462,21 @@ func extractZip(ctx context.Context, archivePath, destination string) error {
 		return err
 	}
 	defer reader.Close()
+	return extractZipFiles(ctx, reader.File, destination)
+}
+
+func extractZipBytes(ctx context.Context, archive []byte, destination string) error {
+	reader, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+	if err != nil {
+		return err
+	}
+	return extractZipFiles(ctx, reader.File, destination)
+}
+
+func extractZipFiles(ctx context.Context, files []*zip.File, destination string) error {
 	destination = filepath.Clean(destination)
 	var total uint64
-	for _, entry := range reader.File {
+	for _, entry := range files {
 		if err := ctx.Err(); err != nil {
 			return err
 		}

@@ -32,6 +32,19 @@ type fakeBrowserExtractor struct {
 	extractCalls    int
 }
 
+type provisioningBrowserExtractor struct {
+	*fakeBrowserExtractor
+	ensureAvailable bool
+	ensureErr       error
+	ensureCalls     int
+}
+
+func (e *provisioningBrowserExtractor) EnsureAvailable(context.Context) (bool, error) {
+	e.ensureCalls++
+	e.available = e.ensureAvailable
+	return e.ensureAvailable, e.ensureErr
+}
+
 func (e *fakeBrowserExtractor) Available(context.Context) (bool, error) {
 	e.availableCalls++
 	return e.available, e.availabilityErr
@@ -181,6 +194,42 @@ func TestCoordinatorPartialFallsBackMergesAndNormalizes(t *testing.T) {
 	want := []model.Song{{Name: "Direct", Artist: "Artist", Hash: "hash-1"}, {Name: "Browser", Artist: "Artist", Hash: "hash-2"}, {Name: "Third", Artist: "Artist", Hash: "hash-3"}}
 	if !reflect.DeepEqual(result.Songs, want) || result.ExpectedTotal != 3 {
 		t.Fatalf("result = %#v, want songs %#v total 3", result, want)
+	}
+}
+
+func TestCoordinatorProvisionsBundledBrowserAndNotifiesBeforeFallback(t *testing.T) {
+	extractor := &fakePlaylistExtractor{name: "direct", err: errors.New("HTTP failed")}
+	baseBrowser := &fakeBrowserExtractor{result: RawResult{Tracks: []TrackCandidate{candidate("Browser", "Artist", "")}}}
+	browser := &provisioningBrowserExtractor{fakeBrowserExtractor: baseBrowser, ensureAvailable: true}
+	identification, err := NewIdentificationRegistry(IdentificationRegistration{
+		ProviderID: "known",
+		Identifier: IdentifierFunc(func(value *url.URL) bool { return value.Hostname() == "known.test" }),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	optimizations, err := NewOptimizationRegistry(OptimizationRegistration{
+		ProviderID: "known", Optimizations: ProviderOptimizations{PlaylistExtractors: []PlaylistExtractor{extractor}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator := NewCoordinator(identification, optimizations, browser)
+	notifications := 0
+	result, err := coordinator.ParsePlaylistWithOptions(context.Background(), "https://known.test/list", ParseOptions{
+		BrowserPolicy: BrowserAuto,
+		OnBrowserFallback: func() {
+			notifications++
+			if baseBrowser.extractCalls != 0 {
+				t.Error("fallback notification arrived after browser extraction")
+			}
+		},
+	})
+	if err != nil || len(result.Songs) != 1 || result.Songs[0].Name != "Browser" {
+		t.Fatalf("ParsePlaylistWithOptions = %#v, %v", result, err)
+	}
+	if browser.ensureCalls != 1 || baseBrowser.extractCalls != 1 || notifications != 1 {
+		t.Fatalf("ensure = %d, extract = %d, notifications = %d", browser.ensureCalls, baseBrowser.extractCalls, notifications)
 	}
 }
 

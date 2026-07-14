@@ -123,6 +123,10 @@ func (a *App) runBrowser(ctx context.Context, args []string) int {
 			return ExitInternal
 		}
 		if !status.Installed {
+			if status.Bundled {
+				fmt.Fprintf(a.IO.Out, "bundled\trevision=%d\tinstalled=false\n", status.Revision)
+				return ExitSuccess
+			}
 			fmt.Fprintln(a.IO.Out, "not installed")
 			return ExitSuccess
 		}
@@ -132,9 +136,17 @@ func (a *App) runBrowser(ctx context.Context, args []string) int {
 		allow := true // The explicit install command is non-interactive approval.
 		status, _ := a.Browser.Status(ctx)
 		size := browserDownloadSize(status)
-		fmt.Fprintf(a.IO.Out, "Chromium 下载%s，完成后会校验 SHA-256。\n", size)
+		if status.Bundled {
+			fmt.Fprintln(a.IO.Out, "正在安装程序内置 Chromium，完成后会校验 SHA-256。")
+		} else {
+			fmt.Fprintf(a.IO.Out, "Chromium 下载%s，完成后会校验 SHA-256。\n", size)
+		}
 		if a.IO.Interactive {
-			answer, _ := a.ask(fmt.Sprintf("将下载经过校验的 Chromium（%s），继续? [y/N] ", size))
+			prompt := fmt.Sprintf("将下载经过校验的 Chromium（%s），继续? [y/N] ", size)
+			if status.Bundled {
+				prompt = "将安装程序内置的 Chromium，继续? [y/N] "
+			}
+			answer, _ := a.ask(prompt)
 			allow = strings.EqualFold(answer, "y")
 		}
 		if !allow {

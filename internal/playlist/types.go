@@ -148,6 +148,13 @@ type BrowserExtractor interface {
 	ExtractPlaylist(context.Context, Source) (RawResult, error)
 }
 
+// BrowserProvisioner is an optional extension implemented by the production
+// browser extractor. It makes a compiled-in browser available without network
+// access when fallback is actually needed.
+type BrowserProvisioner interface {
+	EnsureAvailable(context.Context) (bool, error)
+}
+
 // BrowserPolicy controls whether the coordinator may use the browser
 // fallback.
 type BrowserPolicy string
@@ -157,3 +164,9 @@ const (
 	BrowserNever  BrowserPolicy = "never"
 	BrowserAlways BrowserPolicy = "always"
 )
+
+// ParseOptions controls browser fallback and its user-facing notification.
+type ParseOptions struct {
+	BrowserPolicy     BrowserPolicy
+	OnBrowserFallback func()
+}

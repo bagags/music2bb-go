@@ -50,7 +50,7 @@ consumers outside this module.
 | `internal/matcher` | Candidate filtering, scoring, ranking, and selection thresholds |
 | `internal/kugou` | Browser-free Kugou protocol optimization, response parsing, and song cleanup |
 | `internal/bilibili` | Authentication, search, WBI signing, cookies, and favorite operations |
-| `internal/browser` | Verified Chromium installation and provider-neutral dynamic-page candidate extraction |
+| `internal/browser` | Bundled/downloaded Chromium verification, lazy installation, and provider-neutral dynamic-page candidate extraction |
 | `internal/config` | State paths, embedded matcher defaults, and one-time legacy-state migration |
 | `internal/netx` | Shared HTTP retry, concurrency, and rate-limit behavior |
 | `internal/parity` | Cross-package compatibility tests against the captured Python behavior |
@@ -123,15 +123,20 @@ implicitly attached to every provider.
 | Policy | Processing |
 |---|---|
 | `never` | Run registered provider playlist optimizations only. An unoptimized provider returns an extraction error without launching or installing Chromium. |
-| `auto` | Run provider optimizations, then use an injected or already-installed browser only for an empty or incomplete result. Preserve useful partial songs if the browser is unavailable or fallback fails. |
-| `always` | Require an injected or verified installed browser before processing. Still run provider optimizations first and launch Chromium only for an empty or incomplete result. |
+| `auto` | Run provider optimizations, then lazily provision the bundled browser and notify before Chromium fallback for an empty or incomplete result. Preserve useful partial songs if the browser is unavailable or fallback fails. |
+| `always` | Require an injected, verified installed, or bundled browser before processing. Still run provider optimizations first and launch Chromium only for an empty or incomplete result. |
 
-The backend never installs Chromium or prompts for approval. The CLI owns status,
-approval, installation, and retry. Cancellation or deadline expiry always wins
-over partial success; other fallback errors are ignored when usable songs exist
-and are aggregated only when no songs can be returned. Malformed URLs,
-cancellation, extraction failures, and missing required Chromium continue to map
-to the existing public error categories and CLI exit codes.
+Release builds compile the pinned target-platform Chromium archive into the Go
+binary behind the `bundled_chromium` build tag. The archive is verified against
+the embedded manifest and lazily extracted into the managed cache only when it
+is required. This provisioning path performs no network access and prompts for
+no approval. If an ordinary source build has no bundled archive, the CLI owns a
+final automatic download, install, and retry path and notifies instead of
+prompting. `never` disables both paths. Cancellation or deadline expiry always
+wins over partial success; other fallback errors are ignored when usable songs
+exist and are aggregated only when no songs can be returned. Malformed URLs,
+cancellation, extraction failures, and missing required Chromium continue to
+map to the existing public error categories and CLI exit codes.
 
 ## Configuration ownership
 

@@ -42,6 +42,23 @@ func (e *Extractor) Available(ctx context.Context) (bool, error) {
 	return status.Installed, nil
 }
 
+// EnsureAvailable installs a compiled-in Chromium archive when one is
+// available. It never downloads, so default source builds and tests remain
+// offline until a caller explicitly requests installation.
+func (e *Extractor) EnsureAvailable(ctx context.Context) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if e == nil || e.Manager == nil {
+		return false, nil
+	}
+	status, provisioned, err := e.Manager.ensureBundledInstalled(ctx)
+	if err != nil {
+		return false, err
+	}
+	return provisioned && status.Installed, nil
+}
+
 // ExtractPlaylist extracts ordered provider-neutral track candidates using
 // only the manager's verified Chromium executable.
 func (e *Extractor) ExtractPlaylist(ctx context.Context, source playlist.Source) (playlist.RawResult, error) {

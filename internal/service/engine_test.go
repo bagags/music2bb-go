@@ -13,11 +13,15 @@ import (
 )
 
 type fakePlaylist struct {
-	songs    []model.Song
-	expected int
+	songs           []model.Song
+	expected        int
+	browserFallback bool
 }
 
-func (f fakePlaylist) ParsePlaylist(context.Context, string, BrowserPolicy) (PlaylistResult, error) {
+func (f fakePlaylist) ParsePlaylist(_ context.Context, _ string, _ BrowserPolicy, onBrowserFallback func()) (PlaylistResult, error) {
+	if f.browserFallback && onBrowserFallback != nil {
+		onBrowserFallback()
+	}
 	return PlaylistResult{Songs: f.songs, ExpectedTotal: f.expected}, nil
 }
 
@@ -228,6 +232,30 @@ func TestParsePlaylistWarnsAndContinuesWhenIncomplete(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("missing incomplete warning: %#v", events)
+	}
+}
+
+func TestParsePlaylistNotifiesWhenHTTPFallsBackToChromium(t *testing.T) {
+	remote := &fakeRemote{}
+	engine, err := New(Dependencies{
+		Playlist: fakePlaylist{songs: []model.Song{{Name: "one"}}, browserFallback: true},
+		Match:    remote, Account: remote, Matcher: fakeMatcher{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var messages []string
+	_, err = engine.ParsePlaylist(context.Background(), "https://example.test/list", ParseOptions{}, ObserverFunc(func(event ProgressEvent) {
+		if event.Kind == EventWarning {
+			messages = append(messages, event.Message)
+		}
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "HTTP 解析失败或结果不完整，正在自动切换到 Chromium。"
+	if len(messages) != 1 || messages[0] != want {
+		t.Fatalf("warning messages = %#v, want %q", messages, want)
 	}
 }
 

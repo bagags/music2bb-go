@@ -38,21 +38,43 @@ jobs:
           - goos: darwin
             goarch: arm64
             output: music2bb-darwin-arm64
+            browser_url: https://storage.googleapis.com/chromium-browser-snapshots/Mac_Arm/1321438/chrome-mac.zip
+            browser_sha256: 4a478b542f1f6eaa160e64aab76100501e061d3bba46f6a480897ef1103c70c5
           - goos: darwin
             goarch: amd64
             output: music2bb-darwin-amd64
+            browser_url: https://storage.googleapis.com/chromium-browser-snapshots/Mac/1321438/chrome-mac.zip
+            browser_sha256: b25cd79dc73ebf423b05a4a0d65f772a78e3b87d394e9a2e7d0a4cc9201bda7b
           - goos: windows
             goarch: amd64
             output: music2bb-windows-amd64.exe
+            browser_url: https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/1321438/chrome-win.zip
+            browser_sha256: f8ddee43d6865a974fc8acfcfcb9f6a42e84aadc427482ae2fa2e6a36a413454
           - goos: windows
             goarch: arm64
             output: music2bb-windows-arm64.exe
+            browser_url: https://storage.googleapis.com/chromium-browser-snapshots/Win_Arm64/1321438/chrome-win.zip
+            browser_sha256: 3f429a89d4da66117f8edda67b1a78cfc9fe7323415d969d74badaf162d4f61e
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.x"
           cache: true
+      - uses: actions/cache@v4
+        id: bundled-browser-cache
+        with:
+          path: internal/browser/chromium.zip
+          key: bundled-chromium-1321438-${{ matrix.goos }}-${{ matrix.goarch }}
+      - name: Download bundled Chromium
+        if: steps.bundled-browser-cache.outputs.cache-hit != 'true'
+        env:
+          BROWSER_URL: ${{ matrix.browser_url }}
+        run: curl --fail --location --retry 3 --output internal/browser/chromium.zip "$BROWSER_URL"
+      - name: Verify bundled Chromium
+        env:
+          BROWSER_SHA256: ${{ matrix.browser_sha256 }}
+        run: echo "$BROWSER_SHA256  internal/browser/chromium.zip" | sha256sum --check
       - name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
         env:
           CGO_ENABLED: "0"
@@ -64,7 +86,7 @@ jobs:
         run: |
           mkdir -p "dist/${PACKAGE}"
           BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          go build -trimpath -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${GITHUB_SHA} -X main.date=${BUILD_DATE}" -o "dist/${PACKAGE}/${OUTPUT}" ./cmd/music2bb
+          go build -trimpath -tags=bundled_chromium -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${GITHUB_SHA} -X main.date=${BUILD_DATE}" -o "dist/${PACKAGE}/${OUTPUT}" ./cmd/music2bb
           cp LICENSE.md THIRD_PARTY_NOTICES.md "dist/${PACKAGE}/"
           printf '%s\n' \
             "music2bb ${VERSION}" \

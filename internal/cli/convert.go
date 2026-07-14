@@ -67,7 +67,14 @@ func (a *App) runConvert(ctx context.Context, args []string) int {
 		return ExitInternal
 	}
 
-	observer := a.observer(options.verbose)
+	baseObserver := a.observer(options.verbose)
+	incompleteHTTPResult := false
+	observer := music2bb.ObserverFunc(func(event music2bb.ProgressEvent) {
+		if event.Kind == music2bb.EventWarning && event.Operation == "parse_playlist" && event.Total > 0 && event.Current < event.Total {
+			incompleteHTTPResult = true
+		}
+		baseObserver.Observe(event)
+	})
 	account, err := a.Backend.LoginWithOptions(ctx, music2bb.LoginOptions{UseStoredCookies: true, AllowQR: options.qrLogin}, observer)
 	if err != nil {
 		fmt.Fprintf(a.IO.Err, "登录失败: %v\n", err)
@@ -78,20 +85,23 @@ func (a *App) runConvert(ctx context.Context, args []string) int {
 	}
 
 	songs, err := a.Backend.ParsePlaylistWithOptions(ctx, set.Arg(0), music2bb.ParseOptions{BrowserPolicy: policy}, observer)
-	if err != nil && policy != music2bb.BrowserNever && a.Browser != nil {
+	if (err != nil || incompleteHTTPResult) && policy != music2bb.BrowserNever && a.Browser != nil {
 		status, statusErr := a.Browser.Status(ctx)
 		if statusErr == nil && !status.Installed {
-			approved := policy == music2bb.BrowserAlways
-			if a.IO.Interactive && !approved {
-				answer, _ := a.ask(fmt.Sprintf("直接解析失败。下载%s的校验版 Chromium 后重试? [y/N] ", browserDownloadSize(status)))
-				approved = strings.EqualFold(answer, "y")
+			if status.Bundled {
+				fmt.Fprintln(a.IO.Err, "Chromium 尚未就绪，正在自动安装程序内置版本后重试。")
+			} else {
+				fmt.Fprintf(a.IO.Err, "Chromium 尚未就绪，正在自动下载并安装校验版（%s）后重试。\n", browserDownloadSize(status))
 			}
-			if approved {
-				if _, installErr := a.Browser.Install(ctx, true); installErr == nil {
-					songs, err = a.Backend.ParsePlaylistWithOptions(ctx, set.Arg(0), music2bb.ParseOptions{BrowserPolicy: music2bb.BrowserAlways}, observer)
+			if _, installErr := a.Browser.Install(ctx, true); installErr == nil {
+				retrySongs, retryErr := a.Backend.ParsePlaylistWithOptions(ctx, set.Arg(0), music2bb.ParseOptions{BrowserPolicy: music2bb.BrowserAlways}, observer)
+				if err != nil || retryErr == nil {
+					songs, err = retrySongs, retryErr
 				} else {
-					fmt.Fprintf(a.IO.Err, "浏览器安装失败: %v\n", installErr)
+					fmt.Fprintf(a.IO.Err, "Chromium 回退失败，将继续使用 HTTP 部分结果: %v\n", retryErr)
 				}
+			} else {
+				fmt.Fprintf(a.IO.Err, "浏览器安装失败: %v\n", installErr)
 			}
 		}
 	}

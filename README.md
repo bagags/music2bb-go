@@ -4,7 +4,7 @@
 
 ## 功能
 
-- 自动识别歌单来源，优先使用已注册的来源优化，并以受控 Chromium 提供通用网页回退
+- 自动识别歌单来源，优先使用已注册的来源优化；HTTP 解析失败或不完整时自动通知并切换到受控 Chromium
 - 保留酷狗直连 API、页面 JSON、分页、签名和歌曲清理优化
 - Bilibili 扫码登录、Cookie 持久化、WBI 签名和收藏夹管理
 - 关键词、音质、官方来源、热度和 UP 主权重综合评分
@@ -15,7 +15,7 @@
 
 ## 安装
 
-从 [GitHub Releases](https://github.com/gguage/music-to-bb/releases) 下载与平台对应的压缩包，并使用随附的 `.sha256` 文件校验。压缩包包含单文件程序、GPLv3 许可证、第三方软件声明和对应源码信息。也可以直接安装当前源码：
+从 [GitHub Releases](https://github.com/gguage/music-to-bb/releases) 下载与平台对应的压缩包，并使用随附的 `.sha256` 文件校验。压缩包包含已集成对应平台 Chromium 的单文件程序、GPLv3 许可证、第三方软件声明和对应源码信息。也可以直接安装当前源码：
 
 ```bash
 go install github.com/gguage/music-to-bb/cmd/music2bb@latest
@@ -87,10 +87,10 @@ music2bb convert '<playlist-url>' --top-k 5 --manual-review
 | `--browser` | 处理方式 |
 |---|---|
 | `never` | 只运行来源优化；未知或无对应优化的来源返回提取错误，不启动或安装 Chromium |
-| `auto` | 先运行来源优化，仅在需要时使用已注入或已安装的 Chromium；浏览器不可用或回退失败时保留可用的部分结果 |
-| `always` | 要求 Chromium 已注入或通过校验安装，仍先运行来源优化，并仅在结果为空或不完整时启动浏览器 |
+| `auto` | 先运行来源优化；结果为空或不完整时自动准备并启动已注入、已安装或发布版内置的 Chromium，同时输出切换通知 |
+| `always` | 预先确保已注入、已安装或发布版内置的 Chromium 可用，仍先运行来源优化，并仅在结果为空或不完整时启动浏览器 |
 
-后端解析过程从不安装 Chromium，也不会弹出确认提示。CLI 在解析失败后负责查看浏览器状态、请求批准、安装并重试。浏览器不打包进程序；下载前会显示当前平台归档的实际近似大小，并要求明确批准。
+正式发布构建把目标平台的固定 Chromium 归档嵌入程序。HTTP 解析失败或结果不完整时，后端会自动校验并解压该归档、输出切换通知，然后用 Chromium 重试；整个自动回退过程不会弹出确认提示。普通 `go build` 或 `go install` 构建不携带该大体积归档，CLI 会在首次需要回退时通知用户并自动下载、校验、安装后重试，同样不询问确认。`--browser never` 始终禁止这些行为。
 
 ```bash
 music2bb browser status
@@ -98,7 +98,7 @@ music2bb browser install
 music2bb browser clear
 ```
 
-浏览器版本和各平台 SHA-256 固定在程序内。下载完成、校验通过后才会解压；运行时只接受已记录并重新校验过的可执行文件。
+浏览器版本和各平台 SHA-256 固定在程序内。无论归档来自发布版内置数据还是自动下载，只有 SHA-256 校验通过后才会解压；运行时只接受已记录并重新校验过的可执行文件。显式执行 `browser install` 时仍会在交互终端确认可能发生的下载。
 
 ## 配置与迁移
 
@@ -107,7 +107,7 @@ music2bb browser clear
 - macOS：`~/Library/Application Support/music2bb`
 - Windows：`%AppData%\music2bb`
 
-浏览器文件位于对应的系统缓存目录，不在配置目录或发布二进制中。
+首次浏览器回退后，解压的浏览器文件位于对应的系统缓存目录，不在配置目录中；发布二进制还包含用于首次安装的压缩归档。
 
 可选覆盖文件：
 
@@ -173,7 +173,7 @@ go test -count=1 -tags=authenticated ./internal/bilibili \
   -run TestAuthenticatedFavoriteLifecycleCanary -v
 ```
 
-CI 运行单元、fixture、race、vet、标签编译、平台构建以及 macOS ARM64、Windows AMD64 和 Windows ARM64 的真实浏览器安装、启动和受控提取。`v*` 标签会发布包含许可证、第三方软件声明和对应源码信息的版本化压缩包及其 SHA-256 文件。
+CI 运行单元、fixture、race、vet、标签编译、集成目标平台 Chromium 的平台构建，以及 macOS ARM64、Windows AMD64 和 Windows ARM64 的真实浏览器安装、启动和受控提取。`v*` 标签会发布包含内置 Chromium、许可证、第三方软件声明和对应源码信息的版本化压缩包及其 SHA-256 文件。
 
 ## 许可证
 
@@ -191,4 +191,4 @@ A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 You should have received a copy of the GNU General Public License along with
 music2bb. If not, see <https://www.gnu.org/licenses/>.
 
-发布包所含依赖项的版权与许可证声明见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。Chromium 不包含在 music2bb 发布包中，而是在用户明确批准后从其上游快照地址单独下载。
+发布包所含依赖项及内置 Chromium 的版权与许可证声明见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。

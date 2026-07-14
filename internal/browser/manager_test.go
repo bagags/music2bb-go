@@ -139,6 +139,40 @@ func TestInstallVerifiesArchiveAndExecutable(t *testing.T) {
 	}
 }
 
+func TestEnsureBundledInstalledNeedsNoApprovalOrNetwork(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		http.Error(w, "must not download", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	archive := testArchive(t, "test/chrome", "bundled browser")
+	sum := sha256.Sum256(archive)
+	manager, err := NewManagerWithOptions(ManagerOptions{
+		CacheDir: t.TempDir(), Platform: "test/amd64",
+		Manifest: Manifest{Schema: 1, Artifacts: map[string]Artifact{
+			"test/amd64": {
+				Revision: 7, URL: server.URL, SHA256: hex.EncodeToString(sum[:]), Executable: "test/chrome",
+			},
+		}},
+		HTTPClient: server.Client(), BundledArchive: archive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, provisioned, err := manager.ensureBundledInstalled(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !provisioned || !status.Bundled || !status.Installed || !status.Verified {
+		t.Fatalf("status = %+v, provisioned = %v", status, provisioned)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("download calls = %d, want 0", calls.Load())
+	}
+}
+
 func TestInstallRejectsChecksumMismatchWithoutExtraction(t *testing.T) {
 	archive := testArchive(t, "test/chrome", "unexpected")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

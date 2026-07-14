@@ -59,7 +59,12 @@ func (e *Engine) ParsePlaylist(ctx context.Context, rawURL string, opts ParseOpt
 	}
 	updates := serial(observer, e.now)
 	updates.emit(ProgressEvent{Kind: EventProgress, Operation: "parse_playlist", Message: "正在解析歌单"})
-	result, err := e.playlist.ParsePlaylist(ctx, rawURL, opts.BrowserPolicy)
+	result, err := e.playlist.ParsePlaylist(ctx, rawURL, opts.BrowserPolicy, func() {
+		updates.emit(ProgressEvent{
+			Kind: EventWarning, Operation: "parse_playlist",
+			Message: "HTTP 解析失败或结果不完整，正在自动切换到 Chromium。",
+		})
+	})
 	if err != nil {
 		return nil, classifyContext("parse playlist", ErrorExtraction, err)
 	}

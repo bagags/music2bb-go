@@ -87,7 +87,7 @@ type LoginUpdate struct {
 }
 
 type PlaylistClient interface {
-	ParsePlaylist(ctx context.Context, rawURL string, policy BrowserPolicy) (PlaylistResult, error)
+	ParsePlaylist(ctx context.Context, rawURL string, policy BrowserPolicy, onBrowserFallback func()) (PlaylistResult, error)
 }
 
 type MatchClient interface {

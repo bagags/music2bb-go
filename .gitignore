@@ -2,6 +2,7 @@
 .log
 /dist/
 /.browser-cache/
+/internal/browser/chromium.zip
 /music2bb
 /b.txt
 /w.txt

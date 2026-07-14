@@ -19,6 +19,7 @@ type BrowserStatus struct {
 	Present          bool
 	Installed        bool
 	Verified         bool
+	Bundled          bool
 }
 
 type BrowserInstallOptions struct {
@@ -52,7 +53,7 @@ func browserStatusFromInternal(status browser.Status) BrowserStatus {
 		ApproxBytes:    status.ApproxBytes,
 		ExecutablePath: status.ExecutablePath, ExpectedSHA256: status.ExpectedSHA256,
 		ArchiveSHA256: status.ArchiveSHA256, ExecutableSHA256: status.ExecutableSHA256,
-		Present: status.Present, Installed: status.Installed, Verified: status.Verified,
+		Present: status.Present, Installed: status.Installed, Verified: status.Verified, Bundled: status.Bundled,
 	}
 }
 
