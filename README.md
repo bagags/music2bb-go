@@ -2,6 +2,8 @@
 
 将在线歌单转换为 Bilibili 收藏夹的 Go 项目，命令行程序名为 `music2bb`。它会自动识别歌单来源、解析歌曲、并发搜索并评分 Bilibili 视频，再将确认后的结果写入指定收藏夹。
 
+本仓库最初 fork 自 [`gguage/music-to-bb`](https://github.com/gguage/music-to-bb)，此后以 `music2bb` 名称独立延续开发。
+
 > [!IMPORTANT]
 > music2bb 是独立开发的非官方开源项目，与 Apple、Apple Music、酷狗音乐、
 > Bilibili（哔哩哔哩）或其他被引用的第三方无隶属关系，也未获得其认可或背书。
