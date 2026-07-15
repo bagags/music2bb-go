@@ -204,8 +204,8 @@ CI 运行单元、fixture、race、vet、标签编译、集成目标平台 Chrom
 
 Copyright (C) 2026 bagags and music2bb contributors.
 
-This project is an independent continuation of earlier work by Chaoyi Liu,
-under the `GPL-3.0-only` license.
+This project contains code derived from earlier work by gguage and
+continues development independently under the GPL-3.0-only license.
 
 music2bb is free software: you can redistribute it and/or modify it under the
 terms of the GNU General Public License as published by the Free Software
