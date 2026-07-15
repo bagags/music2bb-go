@@ -135,7 +135,7 @@ func TestConvertAutoInstallsBrowserWithoutPromptAndRetriesAlways(t *testing.T) {
 	app.Browser = browser
 	app.IO.Interactive = true
 	app.IO.In = strings.NewReader("n\n")
-	if exit := app.Run(context.Background(), []string{"convert", "https://example.test/list", "--favorite", "9", "--yes"}); exit != ExitSuccess {
+	if exit := app.Run(context.Background(), []string{"convert", "https://example.test/list", "--no-tui", "--favorite", "9", "--yes"}); exit != ExitSuccess {
 		t.Fatalf("exit = %d, stderr = %q", exit, errOut.String())
 	}
 	if browser.statusCalls != 1 || browser.installCalls != 1 {
@@ -343,7 +343,7 @@ func TestConvertRetriesInvalidFavoriteAndCreatesInline(t *testing.T) {
 	app, out, errOut := testApp(backend)
 	app.IO.Interactive = true
 	app.IO.In = strings.NewReader("invalid\n0\nnew folder\ninline intro\n\n")
-	exit := app.Run(context.Background(), []string{"convert", "https://example.test/list", "--favorite", "missing", "--yes"})
+	exit := app.Run(context.Background(), []string{"convert", "https://example.test/list", "--no-tui", "--favorite", "missing", "--yes"})
 	if exit != ExitSuccess {
 		t.Fatalf("exit = %d, stderr=%q, stdout=%q", exit, errOut.String(), out.String())
 	}
@@ -367,7 +367,7 @@ func TestConvertAutomaticallyReviewsUnsafeMatch(t *testing.T) {
 	app, out, errOut := testApp(backend)
 	app.IO.Interactive = true
 	app.IO.In = strings.NewReader("1\n")
-	exit := app.Run(context.Background(), []string{"convert", "https://example.test/list", "--favorite", "target", "--yes"})
+	exit := app.Run(context.Background(), []string{"convert", "https://example.test/list", "--no-tui", "--favorite", "target", "--yes"})
 	if exit != ExitSuccess {
 		t.Fatalf("exit = %d, stderr=%q, stdout=%q", exit, errOut.String(), out.String())
 	}
