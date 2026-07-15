@@ -8,18 +8,25 @@ import (
 )
 
 type BrowserStatus struct {
-	CacheDir         string
-	Platform         string
-	Revision         int
-	ApproxBytes      int64
-	ExecutablePath   string
-	ExpectedSHA256   string
-	ArchiveSHA256    string
-	ExecutableSHA256 string
-	Present          bool
-	Installed        bool
-	Verified         bool
-	Bundled          bool
+	CacheDir          string
+	Platform          string
+	Version           string
+	Revision          int
+	ChromiumCommit    string
+	SourceURL         string
+	LicenseURL        string
+	ArchiveURL        string
+	ArchiveGeneration string
+	PublishedAt       string
+	ApproxBytes       int64
+	ExecutablePath    string
+	ExpectedSHA256    string
+	ArchiveSHA256     string
+	ExecutableSHA256  string
+	Present           bool
+	Installed         bool
+	Verified          bool
+	Bundled           bool
 }
 
 type BrowserInstallOptions struct {
@@ -49,7 +56,10 @@ func (m *BrowserManager) Clear(ctx context.Context) error {
 
 func browserStatusFromInternal(status browser.Status) BrowserStatus {
 	return BrowserStatus{
-		CacheDir: status.CacheDir, Platform: status.Platform, Revision: status.Revision,
+		CacheDir: status.CacheDir, Platform: status.Platform, Version: status.Version,
+		Revision: status.Revision, ChromiumCommit: status.ChromiumCommit,
+		SourceURL: status.SourceURL, LicenseURL: status.LicenseURL, ArchiveURL: status.ArchiveURL,
+		ArchiveGeneration: status.ArchiveGeneration, PublishedAt: status.PublishedAt,
 		ApproxBytes:    status.ApproxBytes,
 		ExecutablePath: status.ExecutablePath, ExpectedSHA256: status.ExpectedSHA256,
 		ArchiveSHA256: status.ArchiveSHA256, ExecutableSHA256: status.ExecutableSHA256,

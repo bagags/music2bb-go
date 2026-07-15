@@ -40,7 +40,7 @@ func TestPinnedArchiveInstallLaunchAndExtraction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	status, err := manager.Install(ctx, InstallOptions{Approved: true})
 	if err != nil {

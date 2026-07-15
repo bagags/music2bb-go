@@ -43,18 +43,25 @@ type Manager struct {
 
 // Status describes both physical presence and cryptographic verification.
 type Status struct {
-	CacheDir         string
-	Platform         string
-	Revision         int
-	ApproxBytes      int64
-	ExecutablePath   string
-	ExpectedSHA256   string
-	ArchiveSHA256    string
-	ExecutableSHA256 string
-	Present          bool
-	Installed        bool
-	Verified         bool
-	Bundled          bool
+	CacheDir          string
+	Platform          string
+	Version           string
+	Revision          int
+	ChromiumCommit    string
+	SourceURL         string
+	LicenseURL        string
+	ArchiveURL        string
+	ArchiveGeneration string
+	PublishedAt       string
+	ApproxBytes       int64
+	ExecutablePath    string
+	ExpectedSHA256    string
+	ArchiveSHA256     string
+	ExecutableSHA256  string
+	Present           bool
+	Installed         bool
+	Verified          bool
+	Bundled           bool
 }
 
 // InstallOptions separates a user's explicit approval from whether a prompt
@@ -66,7 +73,9 @@ type InstallOptions struct {
 
 type installRecord struct {
 	Platform         string `json:"platform"`
+	Version          string `json:"chromium_version,omitempty"`
 	Revision         int    `json:"revision"`
+	ChromiumCommit   string `json:"chromium_commit,omitempty"`
 	ArchiveSHA256    string `json:"archive_sha256"`
 	Executable       string `json:"executable"`
 	ExecutableSHA256 string `json:"executable_sha256"`
@@ -127,6 +136,11 @@ func (m *Manager) artifact() (Artifact, error) {
 	if !ok || artifact.Revision == 0 || artifact.Executable == "" {
 		return Artifact{}, &Error{Kind: ErrorUnsupportedPlatform, Op: "manifest", Err: fmt.Errorf("no artifact for %s", m.platform)}
 	}
+	if m.manifest.Schema == 2 {
+		if err := validateArtifactProvenance(artifact); err != nil {
+			return Artifact{}, &Error{Kind: ErrorUnverifiedArtifact, Op: "manifest", Err: err}
+		}
+	}
 	return artifact, nil
 }
 
@@ -149,13 +163,20 @@ func (m *Manager) Status(ctx context.Context) (Status, error) {
 		return Status{CacheDir: m.cacheDir, Platform: m.platform}, err
 	}
 	status := Status{
-		CacheDir:       m.cacheDir,
-		Platform:       m.platform,
-		Revision:       artifact.Revision,
-		ApproxBytes:    artifact.ApproxBytes,
-		ExecutablePath: m.executablePath(artifact),
-		ExpectedSHA256: strings.ToLower(artifact.SHA256),
-		Bundled:        len(m.bundledArchive) > 0,
+		CacheDir:          m.cacheDir,
+		Platform:          m.platform,
+		Version:           artifact.Version,
+		Revision:          artifact.Revision,
+		ChromiumCommit:    artifact.Commit,
+		SourceURL:         artifact.SourceURL,
+		LicenseURL:        artifact.LicenseURL,
+		ArchiveURL:        artifact.URL,
+		ArchiveGeneration: artifact.ArchiveGeneration,
+		PublishedAt:       artifact.PublishedAt,
+		ApproxBytes:       artifact.ArchiveBytes,
+		ExecutablePath:    m.executablePath(artifact),
+		ExpectedSHA256:    strings.ToLower(artifact.SHA256),
+		Bundled:           len(m.bundledArchive) > 0,
 	}
 	if _, err := os.Stat(status.ExecutablePath); err == nil {
 		status.Present = true
@@ -177,7 +198,8 @@ func (m *Manager) Status(ctx context.Context) (Status, error) {
 	status.ArchiveSHA256 = strings.ToLower(record.ArchiveSHA256)
 	status.ExecutableSHA256 = strings.ToLower(record.ExecutableSHA256)
 	if !status.Present || !validChecksum(artifact.SHA256) ||
-		record.Platform != m.platform || record.Revision != artifact.Revision ||
+		record.Platform != m.platform || record.Version != artifact.Version ||
+		record.Revision != artifact.Revision || record.ChromiumCommit != artifact.Commit ||
 		!strings.EqualFold(record.ArchiveSHA256, artifact.SHA256) ||
 		filepath.Clean(record.Executable) != filepath.Clean(artifact.Executable) ||
 		!validChecksum(record.ExecutableSHA256) {
@@ -238,13 +260,6 @@ func (m *Manager) install(ctx context.Context) (Status, error) {
 	artifact, err := m.artifact()
 	if err != nil {
 		return Status{}, err
-	}
-	if artifact.Revision != PinnedRevision && m.manifest.Schema == 1 {
-		// Tests may inject another revision using a non-production platform. The
-		// embedded production platforms are always pinned to PinnedRevision.
-		if m.platform == currentPlatform() {
-			return Status{}, &Error{Kind: ErrorUnverifiedArtifact, Op: "install", Err: fmt.Errorf("revision %d is not pinned revision %d", artifact.Revision, PinnedRevision)}
-		}
 	}
 	if !validChecksum(artifact.SHA256) {
 		return Status{}, &Error{Kind: ErrorUnverifiedArtifact, Op: "install", Err: errors.New("embedded archive checksum is absent or a placeholder")}
@@ -310,8 +325,9 @@ func (m *Manager) install(ctx context.Context) (Status, error) {
 		return Status{}, &Error{Kind: ErrorInstall, Op: "replace", Err: err}
 	}
 	record := installRecord{
-		Platform: m.platform, Revision: artifact.Revision,
-		ArchiveSHA256: strings.ToLower(actualHash), Executable: artifact.Executable,
+		Platform: m.platform, Version: artifact.Version, Revision: artifact.Revision,
+		ChromiumCommit: artifact.Commit,
+		ArchiveSHA256:  strings.ToLower(actualHash), Executable: artifact.Executable,
 		ExecutableSHA256: executableHash,
 	}
 	if err := writeRecordAtomic(m.recordPath(), record); err != nil {

@@ -87,9 +87,13 @@ date such litigation is filed.
 
 ## Chromium
 
-Platform release binaries embed Chromium snapshot revision 1321438. Chromium
-is Copyright 2015 The Chromium Authors and is distributed under the following
-BSD-style license:
+Platform release binaries embed an unmodified, checksum-pinned Chromium
+snapshot selected for the target platform: `152.0.7951.0` on macOS and Linux,
+and the newest available Windows build, `152.0.7950.0`, at the recorded cutoff.
+Exact commit, snapshot, archive, publication, and SHA-256 provenance is recorded in
+`CHROMIUM_PROVENANCE.md` and `CHROMIUM_PROVENANCE.json`. Chromium is Copyright
+2015 The Chromium Authors and is distributed under the following BSD-style
+license:
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -99,7 +103,7 @@ modification, are permitted provided that the following conditions are met:
 - Redistributions in binary form must reproduce the above copyright notice,
   this list of conditions and the following disclaimer in the documentation
   and/or other materials provided with the distribution.
-- Neither the name of Google Inc. nor the names of its contributors may be
+- Neither the name of Google LLC nor the names of its contributors may be
   used to endorse or promote products derived from this software without
   specific prior written permission.
 
@@ -115,5 +119,11 @@ CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 
-Chromium also contains third-party components under their own licenses. Their
-notices remain available in Chromium's bundled resources and `chrome://credits`.
+Chromium also contains third-party components under their own licenses. Every
+music2bb release package that embeds Chromium includes the complete
+`CHROMIUM_CREDITS.html` generated from Chromium's shipped-component license
+metadata and audited through the newest embedded source revision. Snapshot
+builds contain only Chromium's sample `chrome://credits` resource, so that
+placeholder is not used as the release notice. The credits file's exact source,
+delta audit, and SHA-256 are recorded in `CHROMIUM_PROVENANCE.md` and
+`CHROMIUM_PROVENANCE.json`.

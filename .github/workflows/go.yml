@@ -31,7 +31,6 @@ jobs:
       - run: go test -run '^$' -tags='live authenticated browser_install' ./...
 
   build:
-    needs: browser-smoke
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -69,7 +68,7 @@ jobs:
         id: bundled-browser-cache
         with:
           path: internal/browser/chromium.zip
-          key: bundled-chromium-${{ steps.chromium.outputs.revision }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          key: bundled-chromium-${{ steps.chromium.outputs.revision }}-${{ steps.chromium.outputs.sha256 }}-${{ matrix.goos }}-${{ matrix.goarch }}
       - name: Download bundled Chromium
         if: steps.bundled-browser-cache.outputs.cache-hit != 'true'
         env:
@@ -79,10 +78,8 @@ jobs:
         env:
           BROWSER_SHA256: ${{ steps.chromium.outputs.sha256 }}
         run: echo "$BROWSER_SHA256  internal/browser/chromium.zip" | sha256sum --check
-      - uses: actions/download-artifact@v4
-        with:
-          name: chromium-credits-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: .chromium-credits
+      - name: Verify Chromium credits
+        run: echo "$(node -p 'require("./internal/browser/manifest.json").credits.sha256')  CHROMIUM_CREDITS.html" | sha256sum --check
       - name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
         env:
           CGO_ENABLED: "0"
@@ -91,18 +88,24 @@ jobs:
           OUTPUT: ${{ matrix.output }}
           PACKAGE: music2bb-${{ matrix.goos }}-${{ matrix.goarch }}
           VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('dev-{0}', github.sha) }}
+          CHROMIUM_VERSION: ${{ steps.chromium.outputs.version }}
+          CHROMIUM_REVISION: ${{ steps.chromium.outputs.revision }}
+          CHROMIUM_COMMIT: ${{ steps.chromium.outputs.commit }}
         run: |
           mkdir -p "dist/${PACKAGE}"
           BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           go build -trimpath -tags=bundled_chromium -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${GITHUB_SHA} -X main.date=${BUILD_DATE}" -o "dist/${PACKAGE}/${OUTPUT}" ./cmd/music2bb
-          cp LICENSE.md THIRD_PARTY_NOTICES.md CHROMIUM_PROVENANCE.md "dist/${PACKAGE}/"
+          cp LICENSE.md THIRD_PARTY_NOTICES.md CHROMIUM_PROVENANCE.md CHROMIUM_CREDITS.html "dist/${PACKAGE}/"
           cp internal/browser/manifest.json "dist/${PACKAGE}/CHROMIUM_PROVENANCE.json"
-          cp .chromium-credits/CHROMIUM_CREDITS.html "dist/${PACKAGE}/"
           printf '%s\n' \
             "music2bb ${VERSION}" \
             "Commit: ${GITHUB_SHA}" \
             "Source repository: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
             "Corresponding source: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/tree/${GITHUB_SHA}" \
+            "Bundled Chromium: ${CHROMIUM_VERSION}" \
+            "Chromium revision: ${CHROMIUM_REVISION}" \
+            "Chromium commit: ${CHROMIUM_COMMIT}" \
+            "Chromium provenance: CHROMIUM_PROVENANCE.md and CHROMIUM_PROVENANCE.json" \
             > "dist/${PACKAGE}/SOURCE.txt"
           if [[ "${GOOS}" == "windows" ]]; then
             ARCHIVE="${PACKAGE}.zip"
@@ -161,12 +164,12 @@ jobs:
         env:
           PLATFORM: ${{ matrix.platform }}
         run: |
-          node -e 'const fs=require("fs"),a=require("./internal/browser/manifest.json").artifacts[process.env.PLATFORM]; for (const [k,v] of Object.entries({url:a.archive_url,revision:a.revision,executable:a.executable})) fs.appendFileSync(process.env.GITHUB_OUTPUT, `${k}=${v}\n`)'
+          node -e 'const fs=require("fs"),a=require("./internal/browser/manifest.json").artifacts[process.env.PLATFORM]; for (const [k,v] of Object.entries({url:a.archive_url,revision:a.revision,sha256:a.sha256})) fs.appendFileSync(process.env.GITHUB_OUTPUT, `${k}=${v}\n`)'
       - uses: actions/cache@v4
         id: browser-cache
         with:
           path: .browser-cache/${{ matrix.archive }}
-          key: chromium-${{ steps.chromium.outputs.revision }}-${{ matrix.os }}
+          key: chromium-${{ steps.chromium.outputs.revision }}-${{ steps.chromium.outputs.sha256 }}-${{ matrix.os }}
       - name: Download pinned Chromium
         if: steps.browser-cache.outputs.cache-hit != 'true'
         shell: bash
@@ -180,22 +183,6 @@ jobs:
         env:
           MUSIC2BB_TEST_BROWSER_ARCHIVE: ${{ github.workspace }}/.browser-cache/${{ matrix.archive }}
         run: go test -count=1 -tags=browser_install ./internal/browser -run TestPinnedArchiveInstallLaunchAndExtraction -v
-      - name: Export complete Chromium credits
-        shell: bash
-        env:
-          CHROMIUM_EXECUTABLE: ${{ steps.chromium.outputs.executable }}
-        run: |
-          mkdir -p .browser-cache/extracted artifacts
-          unzip -q '.browser-cache/${{ matrix.archive }}' -d .browser-cache/extracted
-          '.browser-cache/extracted/'"$CHROMIUM_EXECUTABLE" --headless=new --no-sandbox --disable-gpu --user-data-dir="$RUNNER_TEMP/chromium-credits" --dump-dom chrome://credits > artifacts/CHROMIUM_CREDITS.html
-          test "$(wc -c < artifacts/CHROMIUM_CREDITS.html)" -gt 100000
-          grep -Fq 'The Chromium Project' artifacts/CHROMIUM_CREDITS.html
-          grep -Fq 'Redistribution and use in source and binary forms' artifacts/CHROMIUM_CREDITS.html
-      - uses: actions/upload-artifact@v4
-        with:
-          name: chromium-credits-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: artifacts/CHROMIUM_CREDITS.html
-          if-no-files-found: error
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

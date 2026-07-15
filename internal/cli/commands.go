@@ -124,13 +124,13 @@ func (a *App) runBrowser(ctx context.Context, args []string) int {
 		}
 		if !status.Installed {
 			if status.Bundled {
-				fmt.Fprintf(a.IO.Out, "bundled\trevision=%d\tinstalled=false\n", status.Revision)
+				fmt.Fprintf(a.IO.Out, "bundled\t%s\tinstalled=false\n", browserProvenance(status))
 				return ExitSuccess
 			}
-			fmt.Fprintln(a.IO.Out, "not installed")
+			fmt.Fprintf(a.IO.Out, "not installed\t%s\n", browserProvenance(status))
 			return ExitSuccess
 		}
-		fmt.Fprintf(a.IO.Out, "installed\trevision=%d\tverified=%t\tpath=%s\n", status.Revision, status.Verified, status.ExecutablePath)
+		fmt.Fprintf(a.IO.Out, "installed\t%s\tverified=%t\tpath=%s\n", browserProvenance(status), status.Verified, status.ExecutablePath)
 		return ExitSuccess
 	case "install":
 		allow := true // The explicit install command is non-interactive approval.
@@ -158,7 +158,7 @@ func (a *App) runBrowser(ctx context.Context, args []string) int {
 			fmt.Fprintf(a.IO.Err, "浏览器安装失败: %v\n", err)
 			return ExitExtraction
 		}
-		fmt.Fprintf(a.IO.Out, "installed\trevision=%d\tverified=%t\tpath=%s\n", status.Revision, status.Verified, status.ExecutablePath)
+		fmt.Fprintf(a.IO.Out, "installed\t%s\tverified=%t\tpath=%s\n", browserProvenance(status), status.Verified, status.ExecutablePath)
 		return ExitSuccess
 	case "clear":
 		if err := a.Browser.Clear(ctx); err != nil {
@@ -172,9 +172,21 @@ func (a *App) runBrowser(ctx context.Context, args []string) int {
 	}
 }
 
+func browserProvenance(status music2bb.BrowserStatus) string {
+	version := status.Version
+	if version == "" {
+		version = "unknown"
+	}
+	commit := status.ChromiumCommit
+	if commit == "" {
+		commit = "unknown"
+	}
+	return fmt.Sprintf("version=%s\trevision=%d\tcommit=%s", version, status.Revision, commit)
+}
+
 func browserDownloadSize(status music2bb.BrowserStatus) string {
 	if status.ApproxBytes <= 0 {
-		return "约 150–270 MB"
+		return "约 170–345 MB"
 	}
 	megabytes := (status.ApproxBytes + 999_999) / 1_000_000
 	return fmt.Sprintf("约 %d MB", megabytes)

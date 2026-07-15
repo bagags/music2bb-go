@@ -16,7 +16,7 @@
 
 ## 安装
 
-从 [GitHub Releases](https://github.com/bagags/music2bb-go/releases) 下载与平台对应的压缩包，并使用随附的 `.sha256` 文件校验。压缩包包含已集成对应平台 Chromium 的单文件程序、GPLv3 许可证、第三方软件声明和对应源码信息。也可以直接安装当前源码：
+从 [GitHub Releases](https://github.com/bagags/music2bb-go/releases) 下载与平台对应的压缩包，并使用随附的 `.sha256` 文件校验。压缩包包含已集成对应平台 Chromium 的单文件程序、GPLv3 许可证、第三方软件声明、经来源差异审计并校验哈希的完整 Chromium credits、精确来源记录和对应源码信息。也可以直接安装当前源码：
 
 ```bash
 go install github.com/bagags/music2bb-go/cmd/music2bb@latest
@@ -100,7 +100,7 @@ music2bb browser install
 music2bb browser clear
 ```
 
-浏览器版本和各平台 SHA-256 固定在程序内。无论归档来自发布版内置数据还是自动下载，只有 SHA-256 校验通过后才会解压；运行时只接受已记录并重新校验过的可执行文件。显式执行 `browser install` 时仍会在交互终端确认可能发生的下载。
+浏览器版本、源码提交、快照修订、对象 generation、发布时间、归档大小和各平台 SHA-256 固定在程序内，也记录在 [`CHROMIUM_PROVENANCE.md`](CHROMIUM_PROVENANCE.md) 中。Chromium 各平台构建异步发布，所以当前记录中 macOS/Linux 已是 `152.0.7951.0`，Windows 的最新可用构建仍是 `152.0.7950.0`，而且每个平台可能对应相邻但不同的源码提交。无论归档来自发布版内置数据还是自动下载，只有 SHA-256 校验通过后才会解压；运行时只接受已记录并重新校验过的可执行文件。`browser status` 会显示准确版本、修订和完整提交哈希。显式执行 `browser install` 时仍会在交互终端确认可能发生的下载。
 
 ## 配置与迁移
 
@@ -176,7 +176,7 @@ go test -count=1 -tags=authenticated ./internal/bilibili \
   -run TestAuthenticatedFavoriteLifecycleCanary -v
 ```
 
-CI 运行单元、fixture、race、vet、标签编译、集成目标平台 Chromium 的平台构建，以及 macOS ARM64、Windows AMD64 和 Windows ARM64 的真实浏览器安装、启动和受控提取。`v*` 标签会发布包含内置 Chromium、许可证、第三方软件声明和对应源码信息的版本化压缩包及其 SHA-256 文件。
+CI 运行单元、fixture、race、vet、标签编译、集成目标平台 Chromium 的平台构建，以及发布平台的真实浏览器安装、启动和受控提取。CI 还会校验完整 Chromium credits 的固定哈希、项目数量和必需许可文本，并拒绝 Chromium snapshot 自带的示例 credits。`v*` 标签会发布包含内置 Chromium、许可证、第三方软件声明、完整 Chromium credits、精确来源记录和对应源码信息的版本化压缩包及其 SHA-256 文件。
 
 ## 许可证
 

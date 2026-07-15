@@ -63,34 +63,55 @@ func TestInstallFailsClosedWithPlaceholderManifest(t *testing.T) {
 	}
 }
 
+func TestSchemaTwoManifestRequiresExactProvenance(t *testing.T) {
+	manager, err := NewManagerWithOptions(ManagerOptions{
+		CacheDir: t.TempDir(), Platform: "test/amd64",
+		Manifest: Manifest{Schema: 2, Artifacts: map[string]Artifact{
+			"test/amd64": {Revision: 7, SHA256: testHash("archive"), Executable: "test/chrome"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Status(context.Background()); !IsKind(err, ErrorUnverifiedArtifact) {
+		t.Fatalf("Status error = %v, want %s", err, ErrorUnverifiedArtifact)
+	}
+}
+
 func TestEmbeddedManifestPinsVerifiedArtifacts(t *testing.T) {
 	manifest, err := loadEmbeddedManifest()
 	if err != nil {
 		t.Fatal(err)
 	}
-	expectedPlatforms := []string{
-		"darwin/amd64",
-		"darwin/arm64",
-		"linux/amd64",
-		"windows/amd64",
-		"windows/arm64",
+	expected := map[string]struct {
+		version  string
+		revision int
+	}{
+		"darwin/amd64":  {version: "152.0.7951.0", revision: 1661832},
+		"darwin/arm64":  {version: "152.0.7951.0", revision: 1661829},
+		"linux/amd64":   {version: "152.0.7951.0", revision: 1661846},
+		"windows/amd64": {version: "152.0.7950.0", revision: 1661781},
+		"windows/arm64": {version: "152.0.7950.0", revision: 1661807},
 	}
-	if len(manifest.Artifacts) != len(expectedPlatforms) {
-		t.Errorf("manifest artifact count = %d, want %d", len(manifest.Artifacts), len(expectedPlatforms))
+	if len(manifest.Artifacts) != len(expected) {
+		t.Errorf("manifest artifact count = %d, want %d", len(manifest.Artifacts), len(expected))
 	}
-	for _, platform := range expectedPlatforms {
+	for platform, want := range expected {
 		artifact, ok := manifest.Artifacts[platform]
 		if !ok {
 			t.Errorf("manifest is missing %s", platform)
 			continue
 		}
-		if artifact.Revision != PinnedRevision {
-			t.Errorf("%s revision = %d, want %d", platform, artifact.Revision, PinnedRevision)
+		if artifact.Version != want.version {
+			t.Errorf("%s version = %q, want %s", platform, artifact.Version, want.version)
 		}
-		if !validChecksum(artifact.SHA256) {
-			t.Errorf("%s has invalid checksum %q", platform, artifact.SHA256)
+		if artifact.Revision != want.revision {
+			t.Errorf("%s revision = %d, want %d", platform, artifact.Revision, want.revision)
 		}
-		if artifact.URL == "" || artifact.Executable == "" || artifact.ApproxBytes <= 0 {
+		if err := validateArtifactProvenance(artifact); err != nil {
+			t.Errorf("%s has invalid provenance: %v", platform, err)
+		}
+		if artifact.URL == "" || artifact.Executable == "" || artifact.ArchiveBytes <= 0 {
 			t.Errorf("%s has incomplete artifact metadata: %#v", platform, artifact)
 		}
 	}

@@ -1,40 +1,118 @@
 {
-  "schema": 1,
+  "schema": 2,
+  "project": "Chromium",
+  "resolved_at": "2026-07-14T15:02:53Z",
+  "credits": {
+    "file": "CHROMIUM_CREDITS.html",
+    "sha256": "7bc7529cdf5389d377b993411c2e028d097b784432b79ea55a13317658a74ce5",
+    "base_chromium_version": "152.0.7949.0",
+    "base_main_revision": 1661480,
+    "base_chromium_commit": "a735cab71118205a8bed005264dd415fb9b544db",
+    "base_main_commit": "872a849b602954937d7b4ec19cd353f8351b5468",
+    "base_source_url": "https://chromium.googlesource.com/chromium/src/+/a735cab71118205a8bed005264dd415fb9b544db",
+    "base_archive_url": "https://storage.googleapis.com/chrome-for-testing-public/152.0.7949.0/mac-arm64/chrome-mac-arm64.zip?generation=1784015902449414",
+    "base_archive_generation": "1784015902449414",
+    "base_archive_published_at": "2026-07-14T07:58:22Z",
+    "base_archive_sha256": "43ed7dcebbdf54728bcae5af09f6098f12aa678d7b1e5fafb0ac198c585028bc",
+    "base_archive_bytes": 187781583,
+    "generator": "tools/licenses/licenses.py via chrome://credits",
+    "audited_through_version": "152.0.7951.0",
+    "audited_through_revision": 1661846,
+    "audited_through_commit": "24394684caab9de1b7f4a3a2f83636e3d1449b56",
+    "supplemental_projects": [
+      {
+        "name": "incremental-font-transfer",
+        "version": "0.5.0",
+        "readme_url": "https://chromium.googlesource.com/chromium/src/+/24394684caab9de1b7f4a3a2f83636e3d1449b56/third_party/rust/incremental_font_transfer/v0_5/README.chromium",
+        "license_url": "https://chromium.googlesource.com/chromium/src/+/24394684caab9de1b7f4a3a2f83636e3d1449b56/third_party/rust/chromium_crates_io/vendor/incremental-font-transfer-v0_5/LICENSE-APACHE",
+        "license_sha256": "eba684204073ed715c4abb48129acdfd2bff8ae48339e6a7da3b341d3027b7f0"
+      },
+      {
+        "name": "skera",
+        "version": "0.4.0",
+        "readme_url": "https://chromium.googlesource.com/chromium/src/+/24394684caab9de1b7f4a3a2f83636e3d1449b56/third_party/rust/skera/v0_4/README.chromium",
+        "license_url": "https://chromium.googlesource.com/chromium/src/+/24394684caab9de1b7f4a3a2f83636e3d1449b56/third_party/rust/chromium_crates_io/vendor/skera-v0_4/LICENSE-APACHE",
+        "license_sha256": "eba684204073ed715c4abb48129acdfd2bff8ae48339e6a7da3b341d3027b7f0"
+      },
+      {
+        "name": "write-fonts",
+        "version": "0.50.0",
+        "readme_url": "https://chromium.googlesource.com/chromium/src/+/24394684caab9de1b7f4a3a2f83636e3d1449b56/third_party/rust/write_fonts/v0_50/README.chromium",
+        "license_url": "https://chromium.googlesource.com/chromium/src/+/24394684caab9de1b7f4a3a2f83636e3d1449b56/third_party/rust/chromium_crates_io/vendor/write-fonts-v0_50/LICENSE-APACHE",
+        "license_sha256": "eba684204073ed715c4abb48129acdfd2bff8ae48339e6a7da3b341d3027b7f0"
+      }
+    ]
+  },
   "artifacts": {
     "darwin/arm64": {
-      "revision": 1321438,
-      "url": "https://storage.googleapis.com/chromium-browser-snapshots/Mac_Arm/1321438/chrome-mac.zip",
-      "sha256": "4a478b542f1f6eaa160e64aab76100501e061d3bba46f6a480897ef1103c70c5",
+      "chromium_version": "152.0.7951.0",
+      "revision": 1661829,
+      "chromium_commit": "544d3cf2b1f8195b3133e90511d95e8c0325569b",
+      "source_url": "https://chromium.googlesource.com/chromium/src/+/544d3cf2b1f8195b3133e90511d95e8c0325569b",
+      "license_url": "https://chromium.googlesource.com/chromium/src/+/544d3cf2b1f8195b3133e90511d95e8c0325569b/LICENSE",
+      "revision_url": "https://storage.googleapis.com/chromium-browser-snapshots/Mac_Arm/1661829/REVISIONS",
+      "archive_url": "https://storage.googleapis.com/chromium-browser-snapshots/Mac_Arm/1661829/chrome-mac.zip?generation=1784040642782610",
+      "archive_generation": "1784040642782610",
+      "published_at": "2026-07-14T14:50:42.845Z",
+      "sha256": "dba25ecc9fcc9dba2c9929c238b732a36411fa82e3741de28f6a10fc0eae98bf",
       "executable": "chrome-mac/Chromium.app/Contents/MacOS/Chromium",
-      "approx_bytes": 135605548
+      "archive_bytes": 168652681
     },
     "darwin/amd64": {
-      "revision": 1321438,
-      "url": "https://storage.googleapis.com/chromium-browser-snapshots/Mac/1321438/chrome-mac.zip",
-      "sha256": "b25cd79dc73ebf423b05a4a0d65f772a78e3b87d394e9a2e7d0a4cc9201bda7b",
+      "chromium_version": "152.0.7951.0",
+      "revision": 1661832,
+      "chromium_commit": "45ff7c7b210b9e49d12881193cbb2fbd6b78457e",
+      "source_url": "https://chromium.googlesource.com/chromium/src/+/45ff7c7b210b9e49d12881193cbb2fbd6b78457e",
+      "license_url": "https://chromium.googlesource.com/chromium/src/+/45ff7c7b210b9e49d12881193cbb2fbd6b78457e/LICENSE",
+      "revision_url": "https://storage.googleapis.com/chromium-browser-snapshots/Mac/1661832/REVISIONS",
+      "archive_url": "https://storage.googleapis.com/chromium-browser-snapshots/Mac/1661832/chrome-mac.zip?generation=1784041116228814",
+      "archive_generation": "1784041116228814",
+      "published_at": "2026-07-14T14:58:36.292Z",
+      "sha256": "7b396529a1f55adb5a7817eb7327a1231e049cbbd52e5b31456c0aa9df5e029f",
       "executable": "chrome-mac/Chromium.app/Contents/MacOS/Chromium",
-      "approx_bytes": 149328540
+      "archive_bytes": 187141912
     },
     "windows/amd64": {
-      "revision": 1321438,
-      "url": "https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/1321438/chrome-win.zip",
-      "sha256": "f8ddee43d6865a974fc8acfcfcb9f6a42e84aadc427482ae2fa2e6a36a413454",
+      "chromium_version": "152.0.7950.0",
+      "revision": 1661781,
+      "chromium_commit": "45ce9117c5429ebf83502ff993056fc6e0d8575a",
+      "source_url": "https://chromium.googlesource.com/chromium/src/+/45ce9117c5429ebf83502ff993056fc6e0d8575a",
+      "license_url": "https://chromium.googlesource.com/chromium/src/+/45ce9117c5429ebf83502ff993056fc6e0d8575a/LICENSE",
+      "revision_url": "https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/1661781/REVISIONS",
+      "archive_url": "https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/1661781/chrome-win.zip?generation=1784037828099518",
+      "archive_generation": "1784037828099518",
+      "published_at": "2026-07-14T14:03:48.157Z",
+      "sha256": "544983097cd287be0f43ad1df8bae80be468ae12d8ebd83e581e449b4d4d9b03",
       "executable": "chrome-win/chrome.exe",
-      "approx_bytes": 267483258
+      "archive_bytes": 344108432
     },
     "windows/arm64": {
-      "revision": 1321438,
-      "url": "https://storage.googleapis.com/chromium-browser-snapshots/Win_Arm64/1321438/chrome-win.zip",
-      "sha256": "3f429a89d4da66117f8edda67b1a78cfc9fe7323415d969d74badaf162d4f61e",
+      "chromium_version": "152.0.7950.0",
+      "revision": 1661807,
+      "chromium_commit": "7e338d1ba16c391b2630f8431efabec5f469d7ec",
+      "source_url": "https://chromium.googlesource.com/chromium/src/+/7e338d1ba16c391b2630f8431efabec5f469d7ec",
+      "license_url": "https://chromium.googlesource.com/chromium/src/+/7e338d1ba16c391b2630f8431efabec5f469d7ec/LICENSE",
+      "revision_url": "https://storage.googleapis.com/chromium-browser-snapshots/Win_Arm64/1661807/REVISIONS",
+      "archive_url": "https://storage.googleapis.com/chromium-browser-snapshots/Win_Arm64/1661807/chrome-win.zip?generation=1784040869273457",
+      "archive_generation": "1784040869273457",
+      "published_at": "2026-07-14T14:54:29.328Z",
+      "sha256": "0eec2e412daa206a5bb255cf03539354067896ab39611ee5abfa5e056c711a06",
       "executable": "chrome-win/chrome.exe",
-      "approx_bytes": 255421465
+      "archive_bytes": 323001077
     },
     "linux/amd64": {
-      "revision": 1321438,
-      "url": "https://storage.googleapis.com/chromium-browser-snapshots/Linux_x64/1321438/chrome-linux.zip",
-      "sha256": "b5fb87b55fd81eaba9325d67220585cc12c12df529bd8ae46906d43dd5699e4e",
+      "chromium_version": "152.0.7951.0",
+      "revision": 1661846,
+      "chromium_commit": "24394684caab9de1b7f4a3a2f83636e3d1449b56",
+      "source_url": "https://chromium.googlesource.com/chromium/src/+/24394684caab9de1b7f4a3a2f83636e3d1449b56",
+      "license_url": "https://chromium.googlesource.com/chromium/src/+/24394684caab9de1b7f4a3a2f83636e3d1449b56/LICENSE",
+      "revision_url": "https://storage.googleapis.com/chromium-browser-snapshots/Linux_x64/1661846/REVISIONS",
+      "archive_url": "https://storage.googleapis.com/chromium-browser-snapshots/Linux_x64/1661846/chrome-linux.zip?generation=1784040561659665",
+      "archive_generation": "1784040561659665",
+      "published_at": "2026-07-14T14:49:21.738Z",
+      "sha256": "ba645202abec2a4b26b64442b64fd1c4b1833ad51cf8aaa6b67202a50dd06042",
       "executable": "chrome-linux/chrome",
-      "approx_bytes": 190157449
+      "archive_bytes": 240249260
     }
   }
 }

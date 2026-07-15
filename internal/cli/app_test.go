@@ -302,6 +302,9 @@ func TestLicenseIncludesRequiredNotices(t *testing.T) {
 		"WARRANTY;",
 		"https://github.com/bagags/music2bb-go/blob/main/LICENSE.md",
 		"Source: https://github.com/bagags/music2bb-go",
+		"CHROMIUM_CREDITS.html",
+		"CHROMIUM_PROVENANCE.json",
+		"https://chromium.googlesource.com/chromium/src/",
 	} {
 		if !strings.Contains(out.String(), required) {
 			t.Errorf("output omits %q: %q", required, out.String())
@@ -314,8 +317,12 @@ func TestLicenseIncludesRequiredNotices(t *testing.T) {
 
 func TestBrowserStatusReportsBundledBeforeFirstExtraction(t *testing.T) {
 	app, out, _ := testApp(&fakeBackend{})
-	app.Browser = fakeBrowser{status: music2bb.BrowserStatus{Bundled: true, Revision: 1321438}}
-	if exit := app.Run(context.Background(), []string{"browser", "status"}); exit != ExitSuccess || out.String() != "bundled\trevision=1321438\tinstalled=false\n" {
+	app.Browser = fakeBrowser{status: music2bb.BrowserStatus{
+		Bundled: true, Version: "152.0.7951.0", Revision: 1661829,
+		ChromiumCommit: "544d3cf2b1f8195b3133e90511d95e8c0325569b",
+	}}
+	want := "bundled\tversion=152.0.7951.0\trevision=1661829\tcommit=544d3cf2b1f8195b3133e90511d95e8c0325569b\tinstalled=false\n"
+	if exit := app.Run(context.Background(), []string{"browser", "status"}); exit != ExitSuccess || out.String() != want {
 		t.Fatalf("exit = %d, output = %q", exit, out.String())
 	}
 }

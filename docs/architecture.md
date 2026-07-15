@@ -139,16 +139,30 @@ implicitly attached to every provider.
 | `always` | Require an injected, verified installed, or bundled browser before processing. Still run provider optimizations first and launch Chromium only for an empty or incomplete result. |
 
 Release builds compile the pinned target-platform Chromium archive into the Go
-binary behind the `bundled_chromium` build tag. The archive is verified against
-the embedded manifest and lazily extracted into the managed cache only when it
-is required. This provisioning path performs no network access and prompts for
-no approval. If an ordinary source build has no bundled archive, the CLI owns a
+binary behind the `bundled_chromium` build tag. Each platform has independent
+version, source commit, snapshot revision, object generation, publication time,
+archive size, and SHA-256 provenance in the embedded schema-2 manifest. The
+archive is verified against that manifest and lazily extracted into the managed
+cache only when it is required. The install record binds the verified executable
+to the same Chromium version and commit, so a stale cache cannot satisfy a new
+manifest. This provisioning path performs no network access and prompts for no
+approval. If an ordinary source build has no bundled archive, the CLI owns a
 final automatic download, install, and retry path and notifies instead of
-prompting. `never` disables both paths. Cancellation or deadline expiry always
-wins over partial success; other fallback errors are ignored when usable songs
-exist and are aggregated only when no songs can be returned. Malformed URLs,
-cancellation, extraction failures, and missing required Chromium continue to
-map to the existing public error categories and CLI exit codes.
+prompting. `never` disables both paths.
+
+The release pipeline runs each target archive on its native architecture.
+Chromium snapshots intentionally build a sample-only `chrome://credits` page,
+so release packages instead use the checked-in complete credits artifact. Its
+official generated base, source-delta audit, supplemental entries, and SHA-256
+are recorded in the manifest and `CHROMIUM_PROVENANCE.md`; tests reject
+truncation, missing required notices, and the upstream sample page. Packages
+also include the Chromium BSD notice and both human- and machine-readable
+provenance records.
+Cancellation or deadline expiry always wins over partial success; other
+fallback errors are ignored when usable songs exist and are aggregated only
+when no songs can be returned. Malformed URLs, cancellation, extraction
+failures, and missing required Chromium continue to map to the existing public
+error categories and CLI exit codes.
 
 ## Configuration ownership
 
