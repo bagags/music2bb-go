@@ -3,7 +3,10 @@ package cli
 import "fmt"
 
 const licenseNotice = `music2bb
-Copyright (C) 2026 Chaoyi Liu, bagags, and music2bb contributors.
+Copyright (C) 2026 bagags and music2bb contributors.
+
+This project is an independent continuation of earlier work by Chaoyi Liu,
+under the GPL-3.0-only license.
 
 music2bb is free software: you can redistribute it and/or modify it under the
 terms of the GNU General Public License as published by the Free Software

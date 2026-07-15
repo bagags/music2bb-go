@@ -95,7 +95,7 @@ jobs:
           mkdir -p "dist/${PACKAGE}"
           BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           go build -trimpath -tags=bundled_chromium -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${GITHUB_SHA} -X main.date=${BUILD_DATE}" -o "dist/${PACKAGE}/${OUTPUT}" ./cmd/music2bb
-          cp LICENSE.md THIRD_PARTY_NOTICES.md CHROMIUM_PROVENANCE.md CHROMIUM_CREDITS.html "dist/${PACKAGE}/"
+          cp LICENSE.md DISCLAIMER.md THIRD_PARTY_NOTICES.md CHROMIUM_PROVENANCE.md CHROMIUM_CREDITS.html "dist/${PACKAGE}/"
           cp internal/browser/manifest.json "dist/${PACKAGE}/CHROMIUM_PROVENANCE.json"
           printf '%s\n' \
             "music2bb ${VERSION}" \

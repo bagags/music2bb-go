@@ -2,11 +2,19 @@
 
 将在线歌单转换为 Bilibili 收藏夹的 Go 项目，命令行程序名为 `music2bb`。它会自动识别歌单来源、解析歌曲、并发搜索并评分 Bilibili 视频，再将确认后的结果写入指定收藏夹。
 
+> [!IMPORTANT]
+> music2bb 是独立开发的非官方开源项目，与 Apple、Apple Music、酷狗音乐、
+> Bilibili（哔哩哔哩）或其他被引用的第三方无隶属关系，也未获得其认可或背书。
+> 本项目仅用于个人互操作及迁移用户自行选择的歌单，不是内容获取工具。程序不
+> 下载、上传、托管或解密任何音视频媒体内容；“转换”仅处理歌单和视频元数据及
+> 标识符，并将用户选定的已有视频标识符加入其 Bilibili 收藏夹。完整声明见
+> [`DISCLAIMER.md`](DISCLAIMER.md)。
+
 ## 功能
 
 - 自动识别歌单来源，优先使用已注册的来源优化；HTTP 解析失败或不完整时自动通知并切换到受控 Chromium
 - 保留酷狗直连 API、页面 JSON、分页、签名和歌曲清理优化
-- 使用 Apple Music 公开分享页的服务端序列化数据直接解析歌单，无需账号或 API 凭据
+- 解析用户提供的 Apple Music 公开分享歌单页面及其中的公开元数据，无需 Apple 账号登录
 - Bilibili 扫码登录、Cookie 持久化、WBI 签名和收藏夹管理
 - 关键词、音质、官方来源、热度和 UP 主权重综合评分
 - 默认 4 个受限并发 worker，保持输入与结果顺序
@@ -17,7 +25,7 @@
 
 ## 安装
 
-从 [GitHub Releases](https://github.com/bagags/music2bb-go/releases) 下载与平台对应的压缩包，并使用随附的 `.sha256` 文件校验。压缩包包含已集成对应平台 Chromium 的单文件程序、GPLv3 许可证、第三方软件声明、经来源差异审计并校验哈希的完整 Chromium credits、精确来源记录和对应源码信息。也可以直接安装当前源码：
+从 [GitHub Releases](https://github.com/bagags/music2bb-go/releases) 下载与平台对应的压缩包，并使用随附的 `.sha256` 文件校验。压缩包包含已集成对应平台 Chromium 的单文件程序、GPLv3 许可证、非官方与无隶属关系声明、第三方软件声明、经来源差异审计并校验哈希的完整 Chromium credits、精确来源记录和对应源码信息。也可以直接安装当前源码：
 
 ```bash
 go install github.com/bagags/music2bb-go/cmd/music2bb@latest
@@ -96,7 +104,7 @@ music2bb convert '<playlist-url>' --top-k 5 --manual-review
 
 ## 歌单解析与 Chromium 回退
 
-程序根据原始 HTTP(S) URL 自动识别歌单来源，不需要也不提供 `--provider`。已识别来源会先运行已注册的优化；酷狗优化保留直连 API、页面数据和既有解析顺序，Apple Music 优化读取公开分享页中的 `serialized-server-data`，按页面顺序解析曲名、艺人、专辑、时长和声明总数，不需要 Apple API 凭据。未知来源或没有歌单提取优化的来源，在策略允许时直接使用通用 Chromium 提取。只有来源优化失败、结果为空或少于页面声明总数时才触发浏览器回退；合并时来源优化结果优先，并保留可用的部分歌单。
+程序根据原始 HTTP(S) URL 自动识别歌单来源，不需要也不提供 `--provider`。已识别来源会先运行已注册的优化；酷狗优化保留直连 API、页面数据和既有解析顺序，Apple Music 优化读取用户提供的公开分享歌单页面中的公开元数据，按页面顺序解析曲名、艺人、专辑、时长和声明总数，无需 Apple 账号登录。未知来源或没有歌单提取优化的来源，在策略允许时直接使用通用 Chromium 提取。只有来源优化失败、结果为空或少于页面声明总数时才触发浏览器回退；合并时来源优化结果优先，并保留可用的部分歌单。
 
 | `--browser` | 处理方式 |
 |---|---|
@@ -192,7 +200,10 @@ CI 运行单元、fixture、race、vet、标签编译、集成目标平台 Chrom
 
 ## 许可证
 
-Copyright (C) 2026 Chaoyi Liu, bagags, and music2bb contributors.
+Copyright (C) 2026 bagags and music2bb contributors.
+
+This project is an independent continuation of earlier work by Chaoyi Liu,
+under the `GPL-3.0-only` license.
 
 music2bb is free software: you can redistribute it and/or modify it under the
 terms of the GNU General Public License as published by the Free Software
@@ -207,4 +218,5 @@ You should have received a copy of the GNU General Public License along with
 music2bb. If not, see <https://www.gnu.org/licenses/>.
 
 发布包所含依赖项及内置 Chromium 的版权与许可证声明见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+项目的非官方身份、无隶属关系、音视频媒体处理边界、商标归属和用户责任声明见 [`DISCLAIMER.md`](DISCLAIMER.md)。
 运行 `music2bb license` 可在终端查看项目版权、无担保声明、许可证和源码地址。

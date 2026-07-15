@@ -295,7 +295,8 @@ func TestLicenseIncludesRequiredNotices(t *testing.T) {
 		t.Fatalf("exit = %d, want %d", exit, ExitSuccess)
 	}
 	for _, required := range []string{
-		"Copyright (C) 2026 Chaoyi Liu, bagags, and music2bb contributors.",
+		"Copyright (C) 2026 bagags and music2bb contributors.",
+		"This project is an independent continuation of earlier work by Chaoyi Liu,",
 		"GNU General Public License",
 		"GPL-3.0-only",
 		"WITHOUT ANY",
