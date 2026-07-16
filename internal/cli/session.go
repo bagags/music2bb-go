@@ -264,13 +264,13 @@ func (s *conversionSession) matchUnrestored(ctx context.Context, songs []music2b
 	return outcomes, firstErr
 }
 
-func (s *conversionSession) search(ctx context.Context, song music2bb.Song, query string) ([]music2bb.MatchResult, error) {
+func (s *conversionSession) search(ctx context.Context, song music2bb.Song, query string, observer music2bb.Observer) ([]music2bb.MatchResult, error) {
 	if err := s.prepareSearchState(ctx); err != nil {
 		return nil, err
 	}
 	identity := music2bb.SearchIdentityAnonymous
 	if s.options.searchIdentity == string(music2bb.SearchIdentitySession) {
-		if _, err := s.login(ctx, nil); err != nil {
+		if _, err := s.login(ctx, observer); err != nil {
 			return nil, err
 		}
 		identity = music2bb.SearchIdentitySession
@@ -286,7 +286,7 @@ func (s *conversionSession) search(ctx context.Context, song music2bb.Song, quer
 		}
 		return candidates, err
 	}
-	if _, loginErr := s.login(ctx, nil); loginErr != nil {
+	if _, loginErr := s.login(ctx, observer); loginErr != nil {
 		s.blockWrites(riskReasonOf(err))
 		return nil, loginErr
 	}

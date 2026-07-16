@@ -141,7 +141,7 @@ func (a *App) runPlainConvert(ctx context.Context, session *conversionSession) i
 
 	var outcomes []music2bb.MatchResult
 	if options.manual {
-		outcomes = a.manualMatchAll(ctx, session, songs)
+		outcomes = a.manualMatchAll(ctx, session, songs, observer)
 	} else {
 		outcomes, err = session.match(ctx, songs, observer)
 		if err != nil {
@@ -157,7 +157,7 @@ func (a *App) runPlainConvert(ctx context.Context, session *conversionSession) i
 				fmt.Fprintln(a.IO.Err, "存在需要处理的歌曲；请在交互终端运行，或调整输入使所有歌曲可自动选择")
 				return ExitInvalidInput
 			} else {
-				outcomes = a.reviewMatches(ctx, session, outcomes, options.manualReview)
+				outcomes = a.reviewMatches(ctx, session, outcomes, options.manualReview, observer)
 			}
 		}
 	}
@@ -238,15 +238,15 @@ func (a *App) readManualSongs() []music2bb.Song {
 	return songs
 }
 
-func (a *App) manualMatchAll(ctx context.Context, session *conversionSession, songs []music2bb.Song) []music2bb.MatchResult {
+func (a *App) manualMatchAll(ctx context.Context, session *conversionSession, songs []music2bb.Song, observer music2bb.Observer) []music2bb.MatchResult {
 	outcomes := make([]music2bb.MatchResult, len(songs))
 	for index, song := range songs {
-		outcomes[index] = a.manualMatch(ctx, session, song)
+		outcomes[index] = a.manualMatch(ctx, session, song, observer)
 	}
 	return outcomes
 }
 
-func (a *App) manualMatch(ctx context.Context, session *conversionSession, song music2bb.Song) music2bb.MatchResult {
+func (a *App) manualMatch(ctx context.Context, session *conversionSession, song music2bb.Song, observer music2bb.Observer) music2bb.MatchResult {
 	outcome := music2bb.MatchResult{Song: song, NeedsReview: true, ReviewReason: music2bb.ReviewNotSearched, SearchStatus: music2bb.SearchStatusNotSearched}
 	if !a.IO.Interactive {
 		return outcome
@@ -255,7 +255,7 @@ func (a *App) manualMatch(ctx context.Context, session *conversionSession, song 
 	if query == "" {
 		query = song.SearchKeywordFull()
 	}
-	candidates, err := session.search(ctx, song, query)
+	candidates, err := session.search(ctx, song, query, observer)
 	if err != nil {
 		fmt.Fprintf(a.IO.Err, "搜索失败: %v\n", err)
 		return outcome
@@ -304,7 +304,7 @@ func (a *App) manualMatch(ctx context.Context, session *conversionSession, song 
 	return outcome
 }
 
-func (a *App) reviewMatches(ctx context.Context, session *conversionSession, outcomes []music2bb.MatchResult, reviewAll bool) []music2bb.MatchResult {
+func (a *App) reviewMatches(ctx context.Context, session *conversionSession, outcomes []music2bb.MatchResult, reviewAll bool, observer music2bb.Observer) []music2bb.MatchResult {
 	for index := range outcomes {
 		if !reviewAll && !outcomes[index].NeedsReview {
 			continue
@@ -349,7 +349,7 @@ func (a *App) reviewMatches(ctx context.Context, session *conversionSession, out
 					break
 				}
 			case "s":
-				manual := a.manualMatch(ctx, session, outcomes[index].Song)
+				manual := a.manualMatch(ctx, session, outcomes[index].Song, observer)
 				if manual.HasSelection {
 					manual.NeedsReview = false
 					manual.ReviewReason = music2bb.ReviewNone

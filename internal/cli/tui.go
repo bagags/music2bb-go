@@ -248,7 +248,7 @@ func (c *tuiController) searchCmd(requestID uint64, index int, song music2bb.Son
 	}
 	return c.command(func() {
 		defer c.finishSearch(requestID, cancel)
-		candidates, err := c.session.search(ctx, song, query)
+		candidates, err := c.session.search(ctx, song, query, c.observer())
 		c.send(tuiSearchMsg{requestID: requestID, index: index, candidates: candidates, err: err})
 	})
 }
@@ -458,6 +458,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.controller.waitCmd()
 		}
 		m.searchRequestID = 0
+		m.qr = ""
 		progressCmd := m.endProgress(false)
 		m.busy = false
 		m.overlay = overlayNone
@@ -831,6 +832,7 @@ func (m tuiModel) updateOverlay(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.busy = true
+			m.qr = ""
 			m.validation = "正在手动搜索…"
 			m.nextOverlayRequest++
 			m.searchRequestID = m.nextOverlayRequest
@@ -1335,6 +1337,10 @@ func (m tuiModel) renderOverlay(width, height int) string {
 		footer = "Enter 搜索 · Esc 关闭"
 		if m.busy {
 			footer = "正在搜索…"
+			if m.qr != "" {
+				content = "请使用 Bilibili 客户端扫描：\n\n" + m.qr
+				footer = "等待扫码登录… · Esc 取消"
+			}
 		}
 	case overlayManualSongs:
 		title = "手动输入歌曲"

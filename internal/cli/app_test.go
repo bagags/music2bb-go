@@ -30,8 +30,12 @@ type fakeBackend struct {
 	addFunc     func(context.Context, int64, []music2bb.MatchResult, music2bb.Observer) (music2bb.AddResult, error)
 	loginErr    error
 	loginCalls  int
+	loginEvent  *music2bb.ProgressEvent
+	loginSeen   bool
 	logoutErr   error
 	logoutCalls int
+	searchFunc  func(music2bb.CandidateSearchOptions) ([]music2bb.MatchResult, error)
+	searchCalls int
 }
 
 type persistentFakeBackend struct {
@@ -54,9 +58,13 @@ func (f *persistentFakeBackend) ResetAnonymousIdentity(context.Context) error {
 	return err
 }
 
-func (f *fakeBackend) LoginWithOptions(_ context.Context, opts music2bb.LoginOptions, _ music2bb.Observer) (music2bb.Account, error) {
+func (f *fakeBackend) LoginWithOptions(_ context.Context, opts music2bb.LoginOptions, observer music2bb.Observer) (music2bb.Account, error) {
 	f.loginCalls++
 	f.loginOpts = opts
+	f.loginSeen = observer != nil
+	if observer != nil && f.loginEvent != nil {
+		observer.Observe(*f.loginEvent)
+	}
 	return music2bb.Account{ID: 1, Name: "tester"}, f.loginErr
 }
 
@@ -92,7 +100,11 @@ func (f *fakeBackend) Match(_ context.Context, songs []music2bb.Song, opts music
 }
 
 func (f *fakeBackend) SearchCandidatesWithOptions(_ context.Context, _ music2bb.Song, _ string, options music2bb.CandidateSearchOptions) ([]music2bb.MatchResult, error) {
+	f.searchCalls++
 	f.searchOpts = options
+	if f.searchFunc != nil {
+		return f.searchFunc(options)
+	}
 	return nil, nil
 }
 
@@ -310,11 +322,42 @@ func TestConvertRejectsMatchProfileBeforeBackendWork(t *testing.T) {
 func TestConversionSessionPropagatesProfileToManualSearch(t *testing.T) {
 	backend := &fakeBackend{}
 	session := newConversionSession(backend, nil, "https://example.test/list", convertOptions{matchProfile: string(music2bb.MatchProfileClassical)}, music2bb.BrowserAuto)
-	if _, err := session.search(context.Background(), music2bb.Song{Name: "song"}, "query"); err != nil {
+	if _, err := session.search(context.Background(), music2bb.Song{Name: "song"}, "query", nil); err != nil {
 		t.Fatal(err)
 	}
 	if backend.searchOpts != (music2bb.CandidateSearchOptions{Limit: 10, Profile: music2bb.MatchProfileClassical, SearchIdentity: music2bb.SearchIdentityAnonymous}) {
 		t.Fatalf("search options = %#v", backend.searchOpts)
+	}
+}
+
+func TestManualSearchLoginForwardsObserver(t *testing.T) {
+	for _, identity := range []string{string(music2bb.SearchIdentitySession), "auto"} {
+		t.Run(identity, func(t *testing.T) {
+			qr := music2bb.ProgressEvent{Kind: music2bb.EventQR, Operation: "login", QRPayload: "fixture-qr"}
+			backend := &fakeBackend{loginEvent: &qr}
+			if identity == "auto" {
+				backend.searchFunc = func(options music2bb.CandidateSearchOptions) ([]music2bb.MatchResult, error) {
+					if options.SearchIdentity == music2bb.SearchIdentityAnonymous {
+						return nil, &music2bb.Error{
+							Category: music2bb.ErrorNetwork, Operation: "search", Message: "risk control",
+							RiskReason: music2bb.RiskControlVoucher, SearchIdentity: music2bb.SearchIdentityAnonymous,
+						}
+					}
+					return nil, nil
+				}
+			}
+			session := newConversionSession(backend, nil, "url", convertOptions{
+				matchProfile: string(music2bb.MatchProfileStandard), searchIdentity: identity,
+			}, music2bb.BrowserAuto)
+			var events []music2bb.ProgressEvent
+			observer := music2bb.ObserverFunc(func(event music2bb.ProgressEvent) { events = append(events, event) })
+			if _, err := session.search(context.Background(), music2bb.Song{Name: "song"}, "query", observer); err != nil {
+				t.Fatal(err)
+			}
+			if !backend.loginSeen || len(events) != 1 || events[0].Kind != music2bb.EventQR || events[0].QRPayload != "fixture-qr" {
+				t.Fatalf("login observer/events = %t/%#v", backend.loginSeen, events)
+			}
+		})
 	}
 }
 

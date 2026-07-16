@@ -120,10 +120,16 @@ func TestTUIManualSearchAndPrivateFavoriteCreation(t *testing.T) {
 	if !model.busy {
 		t.Fatal("manual search was not launched")
 	}
+	model = updateTUI(t, model, tuiObserverMsg{event: music2bb.ProgressEvent{
+		Kind: music2bb.EventQR, Operation: "login", QRPayload: "https://example.test/qr",
+	}})
+	if rendered := model.render(); !strings.Contains(rendered, "请使用 Bilibili 客户端扫描") {
+		t.Fatalf("manual-search QR is not visible:\n%s", rendered)
+	}
 	searchRequestID := model.searchRequestID
 	manualVideo := music2bb.Video{BVID: "BV-manual", Title: "Manual", Uploader: "UP"}
 	model = updateTUI(t, model, tuiSearchMsg{requestID: searchRequestID, index: 1, candidates: []music2bb.MatchResult{{Video: &manualVideo, Score: 50}}})
-	if len(model.outcomes[1].Candidates) != 1 || model.overlay != overlayNone {
+	if len(model.outcomes[1].Candidates) != 1 || model.overlay != overlayNone || model.qr != "" {
 		t.Fatalf("manual search result = %#v", model.outcomes[1].Candidates)
 	}
 
