@@ -8,12 +8,14 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
 
 type liveCaptureTransport struct {
 	requestURL string
+	cookies    []string
 	response   []byte
 }
 
@@ -29,8 +31,46 @@ func (t *liveCaptureTransport) RoundTrip(request *http.Request) (*http.Response,
 	}
 	response.Body = io.NopCloser(bytes.NewReader(data))
 	t.requestURL = request.URL.String()
+	t.cookies = append(t.cookies, request.URL.Path+"\t"+request.Header.Get("Cookie"))
 	t.response = append(t.response[:0], data...)
 	return response, nil
+}
+
+// This opt-in anonymous canary performs a real search after seeding the
+// account jar with sentinel credentials. It proves the outgoing anonymous
+// search path does not carry account cookies. Run it with:
+//
+//	MUSIC2BB_RUN_ANON_SEARCH_CANARY=1 MUSIC2BB_TEST_SEARCH_QUERY='贝多芬 第五交响曲' go test -count=1 -tags=live ./internal/bilibili -run TestLiveAnonymousSearchExcludesAccountCookies
+func TestLiveAnonymousSearchExcludesAccountCookies(t *testing.T) {
+	if os.Getenv("MUSIC2BB_RUN_ANON_SEARCH_CANARY") != "1" {
+		t.Skip("MUSIC2BB_RUN_ANON_SEARCH_CANARY is not set to 1")
+	}
+	query := os.Getenv("MUSIC2BB_TEST_SEARCH_QUERY")
+	if query == "" {
+		t.Skip("MUSIC2BB_TEST_SEARCH_QUERY is not set")
+	}
+	capture := &liveCaptureTransport{}
+	client, err := New(Config{Timeout: 30 * time.Second, SearchHTTP: &http.Client{Transport: capture}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.CloseIdleConnections()
+	client.applyCookieString("SESSDATA=account-sentinel; bili_jct=csrf-sentinel; DedeUserID=123")
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	if _, err := client.Search(ctx, query, SearchOptions{Page: 1, PageSize: 5, SearchType: "video", Order: "totalrank", Identity: SearchIdentityAnonymous}); err != nil {
+		t.Fatal(err)
+	}
+	if len(capture.cookies) == 0 {
+		t.Fatal("anonymous canary captured no outgoing requests")
+	}
+	for _, request := range capture.cookies {
+		for _, forbidden := range []string{"SESSDATA=", "bili_jct=", "DedeUserID="} {
+			if strings.Contains(request, forbidden) {
+				t.Fatalf("anonymous request contains account cookie %s: %s", forbidden, request)
+			}
+		}
+	}
 }
 
 // This test is intentionally excluded from the default suite. Run it with:
