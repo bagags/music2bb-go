@@ -1123,7 +1123,7 @@ func (m tuiModel) renderProgress(width int) string {
 	if !m.colorEnabled {
 		return full + empty
 	}
-	fullStyle := lipgloss.NewStyle().Foreground(m.pickColor("#276FBF", "#69A7E7"))
+	fullStyle := lipgloss.NewStyle().Foreground(m.pickColor("#8B6FD6", "#C4B5FD"))
 	emptyStyle := lipgloss.NewStyle().Foreground(m.pickColor("#B8C5D1", "#43566A"))
 	return fullStyle.Render(full) + emptyStyle.Render(empty)
 }
@@ -1142,7 +1142,7 @@ func (m tuiModel) renderHeader(width int) string {
 	text := fmt.Sprintf(" music2bb · %s%s  自动 %d  待审 %d  跳过 %d  失败 %d", m.phaseName(), progress, automatic, review, skipped, failed)
 	style := lipgloss.NewStyle().Padding(0, 1)
 	if m.colorEnabled {
-		style = style.Bold(true).Foreground(m.pickColor("#17324D", "#D7E9FF")).Background(m.pickColor("#DCEEFF", "#20354D"))
+		style = style.Bold(true).Foreground(m.pickColor("#5A263E", "#FFE4EF")).Background(m.pickColor("#FBE3EE", "#563247"))
 	}
 	return style.Width(maxInt(1, width)).Render(ansi.TruncateWc(text, maxInt(1, width-2), "…"))
 }
@@ -1169,7 +1169,7 @@ func (m tuiModel) renderWorkspace(width, height int) string {
 func (m tuiModel) paneStyle(width, height int, active bool) lipgloss.Style {
 	borderColor := m.pickColor("#8292A2", "#6F8296")
 	if active {
-		borderColor = m.pickColor("#276FBF", "#69A7E7")
+		borderColor = m.pickColor("#D77CA3", "#F0A6C5")
 	}
 	style := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1).
 		Width(maxInt(1, width)).Height(maxInt(1, height))
@@ -1238,7 +1238,7 @@ func (m tuiModel) renderSong(index, width int) string {
 	}
 	block := strings.Join(wrapped, "\n")
 	if selected && m.colorEnabled {
-		block = lipgloss.NewStyle().Bold(true).Foreground(m.pickColor("#185F9D", "#8CC8FF")).Render(block)
+		block = lipgloss.NewStyle().Bold(true).Foreground(m.pickColor("#AD3F70", "#FFB4D2")).Render(block)
 	}
 	return block
 }
@@ -1371,7 +1371,7 @@ func (m tuiModel) renderOverlay(width, height int) string {
 	box := lipgloss.NewStyle().Border(lipgloss.DoubleBorder()).Padding(1, 2).
 		Width(boxWidth).Height(boxHeight)
 	if m.colorEnabled {
-		box = box.BorderForeground(m.pickColor("#276FBF", "#7DB8F2"))
+		box = box.BorderForeground(m.pickColor("#D77CA3", "#F0A6C5"))
 	}
 	body := fixedSize(title+"\n\n"+content+"\n\n"+footer,
 		boxWidth-box.GetHorizontalFrameSize(), boxHeight-box.GetVerticalFrameSize())
