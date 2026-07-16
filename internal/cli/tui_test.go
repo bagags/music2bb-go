@@ -416,6 +416,40 @@ func TestTUIProgressAnimationIsQuickInSlowOut(t *testing.T) {
 	}
 }
 
+func TestTUIProgressBarTracksFavoriteWrites(t *testing.T) {
+	model, cleanup := testTUIModel(t)
+	defer cleanup()
+	model.width, model.height = 80, 20
+	model.colorEnabled = false
+	model.songs = sampleSongs()
+	model.outcomes = sampleOutcomes()
+	model.outcomes[1].Video = model.outcomes[1].Candidates[0].Video
+	model.outcomes[1].HasSelection = true
+	model.outcomes[1].NeedsReview = false
+	model.skipped = make([]bool, len(model.outcomes))
+	model.selectedFavorite = music2bb.Favorite{ID: 9, Title: "target"}
+
+	model.beginWrite()
+	if model.phase != phaseWrite || !model.progressVisible || model.writeDone != 0 || model.writeTotal != 2 {
+		t.Fatalf("initial write progress = phase %v visible=%v %d/%d", model.phase, model.progressVisible, model.writeDone, model.writeTotal)
+	}
+	writing := strings.Split(model.render(), "\n")
+	if len(writing) != model.height || strings.Contains(writing[0], "music2bb") || !strings.Contains(writing[1], "写入 0/2") {
+		t.Fatalf("write progress is not visible at the top:\n%s", strings.Join(writing, "\n"))
+	}
+
+	model = updateTUI(t, model, tuiObserverMsg{event: music2bb.ProgressEvent{
+		Kind: music2bb.EventVideo, Operation: "add_favorite", Message: "BV-auto", Current: 1, Total: 2,
+	}})
+	if model.writeDone != 1 || model.writeTotal != 2 || model.progressTarget != 0.5 {
+		t.Fatalf("write receipt progress = %d/%d target=%.2f", model.writeDone, model.writeTotal, model.progressTarget)
+	}
+	model = updateTUI(t, model, tuiProgressTickMsg{generation: model.progressGeneration})
+	if model.progressValue <= 0 || model.progressValue >= 0.5 || !strings.Contains(model.renderHeader(model.width), "写入 1/2") {
+		t.Fatalf("animated write progress = %.3f header=%q", model.progressValue, model.renderHeader(model.width))
+	}
+}
+
 func TestTUISongListWrapsFullNamesAndShowsOnlySelectedArtist(t *testing.T) {
 	model, cleanup := testTUIModel(t)
 	defer cleanup()

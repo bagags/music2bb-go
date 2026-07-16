@@ -341,6 +341,8 @@ type tuiModel struct {
 	favoriteCursor   int
 	selectedFavorite music2bb.Favorite
 	writeResult      music2bb.AddResult
+	writeDone        int
+	writeTotal       int
 
 	overlay       tuiOverlay
 	input         textinput.Model
@@ -504,6 +506,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.validation = ""
 		return m, m.controller.waitCmd()
 	case tuiWriteMsg:
+		m.progressValue = 1
+		m.progressTarget = 1
 		m.writeResult = msg.result
 		m.phase = phaseResult
 		m.exitCode = ExitSuccess
@@ -612,6 +616,11 @@ func (m *tuiModel) applyObserver(event music2bb.ProgressEvent) {
 		}
 	}
 	if event.Kind == music2bb.EventVideo && event.Operation == "add_favorite" && event.Message != "" {
+		m.writeDone = event.Current
+		m.writeTotal = event.Total
+		if event.Total > 0 {
+			m.progressTarget = max(0, min(1, float64(event.Current)/float64(event.Total)))
+		}
 		if event.WriteReceipt == nil || event.WriteReceipt.Succeeded {
 			m.writeResult.Succeeded = append(m.writeResult.Succeeded, event.Message)
 		}
@@ -628,6 +637,8 @@ func (m *tuiModel) beginProgress(indeterminate bool) tea.Cmd {
 	m.progressExpanded = indeterminate
 	if indeterminate {
 		m.progressTarget = 0.82
+	} else if m.phase == phaseWrite && m.writeTotal > 0 {
+		m.progressTarget = max(0, min(1, float64(m.writeDone)/float64(m.writeTotal)))
 	} else if len(m.songs) > 0 {
 		m.progressTarget = max(0, min(1, float64(m.matchDone)/float64(len(m.songs))))
 	}
@@ -654,7 +665,8 @@ func (m *tuiModel) animateProgress() tea.Cmd {
 	}
 	activeSearch := m.searchRequestID != 0
 	activeMatch := m.phase == phaseMatch
-	if !m.progressExiting && !activeSearch && (!activeMatch || math.Abs(m.progressTarget-m.progressValue) < 0.005) {
+	activeWrite := m.phase == phaseWrite
+	if !m.progressExiting && !activeSearch && ((!activeMatch && !activeWrite) || math.Abs(m.progressTarget-m.progressValue) < 0.005) {
 		return nil
 	}
 	m.progressTicking = true
@@ -929,7 +941,13 @@ func (m *tuiModel) beginWrite() tea.Cmd {
 	m.phase = phaseWrite
 	m.phaseText = "正在写入收藏夹"
 	m.validation = "按 q 可停止剩余写入；已成功项目会保留。"
-	return m.controller.writeCmd(m.selectedFavorite.ID, cloneMatchResults(m.outcomes))
+	m.writeResult = music2bb.AddResult{FavoriteID: m.selectedFavorite.ID}
+	m.writeDone = 0
+	m.writeTotal, _ = m.selectionCounts()
+	return tea.Batch(
+		m.beginProgress(false),
+		m.controller.writeCmd(m.selectedFavorite.ID, cloneMatchResults(m.outcomes)),
+	)
 }
 
 func (m *tuiModel) moveSong(delta int) {
@@ -1143,7 +1161,9 @@ func (m tuiModel) renderBottomLine(text string, width int) string {
 func (m tuiModel) renderHeader(width int) string {
 	automatic, review, skipped, failed := m.counts()
 	progress := ""
-	if len(m.songs) > 0 {
+	if m.phase == phaseWrite && m.writeTotal > 0 {
+		progress = fmt.Sprintf(" %d/%d", m.writeDone, m.writeTotal)
+	} else if len(m.songs) > 0 {
 		progress = fmt.Sprintf(" %d/%d", m.matchDone, len(m.songs))
 	}
 	text := fmt.Sprintf(" music2bb · %s%s  自动 %d  待审 %d  跳过 %d  失败 %d", m.phaseName(), progress, automatic, review, skipped, failed)
