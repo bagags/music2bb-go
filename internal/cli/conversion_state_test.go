@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -77,6 +78,60 @@ func TestManualDecisionsReuseAcrossPlaylistsAndHardExpire(t *testing.T) {
 	}
 	if len(restored) != 0 {
 		t.Fatalf("expired decisions restored from decision or checkpoint: %#v", restored)
+	}
+}
+
+func TestAutomaticOutcomeRetiresExpiredManualDecision(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+	song := music2bb.Song{Name: "Song", SourceID: "source:song"}
+	manualVideo := music2bb.Video{BVID: "BV-manual"}
+	state := newConversionState(root, "https://music.example/list", clock)
+	if err := state.saveDecision(music2bb.MatchResult{Song: song, Video: &manualVideo, HasSelection: true}, false); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(manualDecisionTTL)
+	if restored, err := state.restore([]music2bb.Song{song}, false); err != nil || len(restored) != 0 {
+		t.Fatalf("expired restore = %#v, %v", restored, err)
+	}
+	automaticVideo := music2bb.Video{BVID: "BV-automatic"}
+	if err := state.saveOutcome(music2bb.MatchResult{Song: song, Video: &automaticVideo, HasSelection: true, SearchStatus: music2bb.SearchStatusCompleted}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(state.decisionPath(stableSongID(song))); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expired decision still exists: %v", err)
+	}
+	reloaded := newConversionState(root, "https://music.example/list", clock)
+	restored, err := reloaded.restore([]music2bb.Song{song}, false)
+	if err != nil || restored[stableSongID(song)].Video == nil || restored[stableSongID(song)].Video.BVID != "BV-automatic" {
+		t.Fatalf("automatic checkpoint restore = %#v, %v", restored, err)
+	}
+}
+
+func TestAutomaticOutcomeClearsManualMarkerAfterDecisionCacheClear(t *testing.T) {
+	root := t.TempDir()
+	song := music2bb.Song{Name: "Song", SourceID: "source:song"}
+	manualVideo := music2bb.Video{BVID: "BV-manual"}
+	state := newConversionState(root, "https://music.example/list", time.Now)
+	if err := state.saveDecision(music2bb.MatchResult{Song: song, Video: &manualVideo, HasSelection: true}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(state.decisionsDir); err != nil {
+		t.Fatal(err)
+	}
+	reloaded := newConversionState(root, "https://music.example/list", time.Now)
+	if restored, err := reloaded.restore([]music2bb.Song{song}, false); err != nil || len(restored) != 0 {
+		t.Fatalf("cleared decision restore = %#v, %v", restored, err)
+	}
+	automaticVideo := music2bb.Video{BVID: "BV-automatic"}
+	if err := reloaded.saveOutcome(music2bb.MatchResult{Song: song, Video: &automaticVideo, HasSelection: true, SearchStatus: music2bb.SearchStatusCompleted}); err != nil {
+		t.Fatal(err)
+	}
+	final := newConversionState(root, "https://music.example/list", time.Now)
+	restored, err := final.restore([]music2bb.Song{song}, false)
+	if err != nil || restored[stableSongID(song)].Video == nil || restored[stableSongID(song)].Video.BVID != "BV-automatic" {
+		t.Fatalf("automatic checkpoint restore = %#v, %v", restored, err)
 	}
 }
 

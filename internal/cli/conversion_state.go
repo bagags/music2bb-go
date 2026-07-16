@@ -144,11 +144,19 @@ func (s *conversionState) saveOutcome(outcome music2bb.MatchResult) error {
 		return err
 	}
 	sourceID := stableSongID(outcome.Song)
+	decision, hasDecision, err := s.loadDecisionLocked(sourceID)
+	if err != nil {
+		return err
+	}
+	if hasDecision && !s.decisionFresh(decision) {
+		if err := os.Remove(s.decisionPath(sourceID)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("remove expired manual decision: %w", err)
+		}
+	}
 	outcome = cloneMatchResults([]music2bb.MatchResult{outcome})[0]
 	outcome.Song = songWithStableID(outcome.Song)
 	now := s.now().UTC()
-	previous := s.document.Songs[sourceID]
-	s.document.Songs[sourceID] = checkpointSong{SourceID: sourceID, Outcome: outcome, ManualDecision: previous.ManualDecision, UpdatedAt: now}
+	s.document.Songs[sourceID] = checkpointSong{SourceID: sourceID, Outcome: outcome, ManualDecision: false, UpdatedAt: now}
 	s.document.UpdatedAt = now
 	return writeStateJSON(s.checkpointPath, s.document)
 }
