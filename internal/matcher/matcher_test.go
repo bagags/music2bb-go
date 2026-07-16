@@ -375,13 +375,13 @@ func TestClassicalCatalogueBoostPreservesAmbiguityDecision(t *testing.T) {
 	}
 }
 
-func TestClassicalDecisionWaitsForFallbackAndReviewsCloseRecordings(t *testing.T) {
+func TestClassicalDecisionStopsAtHighConfidenceAndReviewsCloseRecordings(t *testing.T) {
 	t.Parallel()
 	classical := resolvedMatcher(t, New(Options{}), service.MatchProfileClassical, nil)
 	video := func(id string) *model.Video { return &model.Video{BVID: id, Title: "Moon Light Sonata"} }
 	strong := model.MatchResult{Video: video("strong"), Matched: true, TitleScore: 100, KeywordScore: 100, ArtistScore: 100, Score: 55}
-	if got := classical.Decide(model.Song{Name: "Moon Light Sonata"}, []model.MatchResult{strong}, false); !got.Continue || got.SelectedIndex != -1 {
-		t.Fatalf("classical artist phase decision = %#v", got)
+	if got := classical.Decide(model.Song{Name: "Moon Light Sonata"}, []model.MatchResult{strong}, false); got.Continue || got.SelectedIndex != 0 {
+		t.Fatalf("classical high-confidence first response = %#v", got)
 	}
 	if got := classical.Decide(model.Song{Name: "Moon Light Sonata"}, []model.MatchResult{strong}, true); got.SelectedIndex != 0 || got.Continue {
 		t.Fatalf("classical strong fallback decision = %#v", got)
@@ -399,16 +399,19 @@ func TestBalancedQueryPhases(t *testing.T) {
 	t.Parallel()
 	strategy := New(Options{})
 	phases := strategy.QueryPhases(model.Song{Name: "Song", Artist: "初音ミク"})
-	if len(phases) != 2 {
-		t.Fatalf("phases = %#v, want artist and title phases", phases)
+	if len(phases) != 4 {
+		t.Fatalf("phases = %#v, want full, title, and alias queries", phases)
 	}
-	if got := phases[len(phases)-1].Queries; len(got) != 1 || got[0] != "Song" {
-		t.Fatalf("title fallback = %#v", got)
-	}
-	for _, query := range phases[0].Queries {
-		if query == "Song" {
-			t.Fatalf("title-only query leaked into artist phase: %#v", phases)
+	want := []string{"Song 初音ミク", "Song", "Song 初音未来", "Song Miku"}
+	for index, phase := range phases {
+		if len(phase.Queries) != 1 || phase.Queries[0] != want[index] {
+			t.Fatalf("phase %d = %#v, want %q", index, phase, want[index])
 		}
+	}
+	classical := resolvedMatcher(t, strategy, service.MatchProfileClassical, nil)
+	classicalPhases := classical.QueryPhases(model.Song{Name: "Song", Artist: "初音ミク"})
+	if classicalPhases[0].Queries[0] != "Song" || classicalPhases[1].Queries[0] != "Song 初音ミク" {
+		t.Fatalf("classical query order = %#v", classicalPhases)
 	}
 }
 

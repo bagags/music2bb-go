@@ -295,23 +295,35 @@ func (m *Matcher) Match(song model.Song, videos []model.Video, topK int) []model
 	return results
 }
 
-// QueryPhases returns artist-aware queries followed by a title-only fallback.
+// QueryPhases returns profile-aware query expansion order. The service walks
+// the flattened queries page-width-first and re-scores after every response.
 func (m *Matcher) QueryPhases(song model.Song) []service.QueryPhase {
 	title := strings.TrimSpace(song.SearchKeyword())
-	artistQueries := make([]string, 0, 3)
-	for _, query := range append([]string{song.SearchKeywordFull()}, song.AllSearchKeywords()...) {
+	full := strings.TrimSpace(song.SearchKeywordFull())
+	aliases := make([]string, 0, 3)
+	for _, query := range song.AllSearchKeywords() {
 		query = strings.TrimSpace(query)
-		if query == "" || query == title || containsStringFold(artistQueries, query) {
+		if query == "" || query == title || strings.EqualFold(query, full) || containsStringFold(aliases, query) {
 			continue
 		}
-		artistQueries = append(artistQueries, query)
+		aliases = append(aliases, query)
 	}
-	phases := make([]service.QueryPhase, 0, 2)
-	if len(artistQueries) > 0 {
-		phases = append(phases, service.QueryPhase{Queries: artistQueries})
+	ordered := make([]string, 0, 2+len(aliases))
+	if m.profile == service.MatchProfileClassical {
+		ordered = append(ordered, title, full)
+	} else {
+		ordered = append(ordered, full, title)
 	}
-	if title != "" {
-		phases = append(phases, service.QueryPhase{Queries: []string{title}})
+	ordered = append(ordered, aliases...)
+	phases := make([]service.QueryPhase, 0, len(ordered))
+	seen := make([]string, 0, len(ordered))
+	for _, query := range ordered {
+		query = strings.TrimSpace(query)
+		if query == "" || containsStringFold(seen, query) {
+			continue
+		}
+		seen = append(seen, query)
+		phases = append(phases, service.QueryPhase{Queries: []string{query}})
 	}
 	return phases
 }
@@ -333,6 +345,17 @@ func (m *Matcher) Decide(_ model.Song, ranked []model.MatchResult, finalPhase bo
 			}
 		}
 	}
+	if m.profile == service.MatchProfileClassical && meetsCandidateThreshold(ranked, 45) {
+		if candidateHasMargin(ranked) {
+			decision.SelectedIndex = 0
+			decision.Continue = false
+			return decision
+		}
+		if !finalPhase {
+			decision.ReviewReason = model.ReviewAmbiguous
+			return decision
+		}
+	}
 	if !finalPhase {
 		if m.profile == service.MatchProfileStandard {
 			decision.ReviewReason = model.ReviewArtistUnverified
@@ -343,25 +366,42 @@ func (m *Matcher) Decide(_ model.Song, ranked []model.MatchResult, finalPhase bo
 		decision.ReviewReason = model.ReviewNoCandidates
 		return decision
 	}
-	top := ranked[0]
 	minimumTotal := 35.0
 	if m.profile == service.MatchProfileClassical {
 		minimumTotal = 45
 	}
-	if effectiveTitleScore(top) < 70 || top.Score < minimumTotal {
+	if !meetsCandidateThreshold(ranked, minimumTotal) {
 		decision.ReviewReason = model.ReviewWeakTitle
 		return decision
 	}
-	runnerUp := 0.0
-	if len(ranked) > 1 {
-		runnerUp = ranked[1].Score
-	}
-	if top.Score-runnerUp < 5 {
+	if !candidateHasMargin(ranked) {
 		decision.ReviewReason = model.ReviewAmbiguous
 		return decision
 	}
 	decision.SelectedIndex = 0
 	return decision
+}
+
+func meetsCandidateThreshold(ranked []model.MatchResult, minimumTotal float64) bool {
+	if len(ranked) == 0 || ranked[0].Video == nil {
+		return false
+	}
+	top := ranked[0]
+	if effectiveTitleScore(top) < 70 || top.Score < minimumTotal {
+		return false
+	}
+	return effectiveTitleScore(top) >= 70 && top.Score >= minimumTotal
+}
+
+func candidateHasMargin(ranked []model.MatchResult) bool {
+	if len(ranked) == 0 {
+		return false
+	}
+	runnerUp := 0.0
+	if len(ranked) > 1 {
+		runnerUp = ranked[1].Score
+	}
+	return ranked[0].Score-runnerUp >= 5
 }
 
 // FuzzyContains applies a sliding-window 80-percent comparison.

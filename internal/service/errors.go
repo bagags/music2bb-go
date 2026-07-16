@@ -21,10 +21,12 @@ const (
 )
 
 type OperationError struct {
-	Category  ErrorCategory
-	Operation string
-	Message   string
-	Err       error
+	Category       ErrorCategory
+	Operation      string
+	Message        string
+	Err            error
+	RiskReason     RiskControlReason
+	SearchIdentity SearchIdentity
 }
 
 func (e *OperationError) Error() string {
@@ -59,10 +61,15 @@ type ItemFailure struct {
 }
 
 type BatchError struct {
-	Category ErrorCategory
-	Failures []ItemFailure
+	Category       ErrorCategory
+	Failures       []ItemFailure
+	HaltReason     RiskControlReason
+	SearchIdentity SearchIdentity
 }
 
 func (e *BatchError) Error() string {
+	if e.HaltReason != "" {
+		return fmt.Sprintf("%s: search halted for %s identity (%s)", e.Category, e.SearchIdentity, e.HaltReason)
+	}
 	return fmt.Sprintf("%s: %d item(s) failed", e.Category, len(e.Failures))
 }

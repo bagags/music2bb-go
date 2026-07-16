@@ -55,6 +55,11 @@ type MatchResult struct {
 	ManualOverride  bool
 	NeedsReview     bool
 	ReviewReason    ReviewReason
+	SearchIdentity  SearchIdentity
+	SearchStatus    SearchStatus
+	RemoteRequests  int
+	CacheHits       int
+	RiskReason      RiskControlReason
 	Candidates      []MatchResult
 	Failure         *ItemFailure
 }
@@ -69,6 +74,30 @@ const (
 	ReviewWeakTitle        ReviewReason = "weak_title"
 	ReviewArtistUnverified ReviewReason = "artist_unverified"
 	ReviewAmbiguous        ReviewReason = "ambiguous"
+	ReviewRiskControl      ReviewReason = "risk_control"
+	ReviewNotSearched      ReviewReason = "not_searched"
+	ReviewBudgetExhausted  ReviewReason = "budget_exhausted"
+)
+
+// SearchStatus describes how far remote search progressed for one song.
+type SearchStatus string
+
+const (
+	SearchStatusCompleted       SearchStatus = "completed"
+	SearchStatusRiskControl     SearchStatus = "risk_control"
+	SearchStatusNotSearched     SearchStatus = "not_searched"
+	SearchStatusBudgetExhausted SearchStatus = "budget_exhausted"
+	SearchStatusFailed          SearchStatus = "failed"
+)
+
+// RiskControlReason is a machine-readable Bilibili risk-control signal.
+type RiskControlReason string
+
+const (
+	RiskControlVoucher  RiskControlReason = "voucher"
+	RiskControlHTTP412  RiskControlReason = "http_412"
+	RiskControlCode412  RiskControlReason = "code_-412"
+	RiskControlCode1200 RiskControlReason = "code_-1200"
 )
 
 type Favorite struct {

@@ -45,12 +45,13 @@ const (
 )
 
 type Config struct {
-	ConfigDir     string
-	CacheDir      string
-	HTTPTimeout   time.Duration
-	RatePerSecond float64
-	Login         LoginOptions
-	Browser       BrowserOptions
+	ConfigDir           string
+	CacheDir            string
+	HTTPTimeout         time.Duration
+	RatePerSecond       float64
+	SearchRatePerSecond float64
+	Login               LoginOptions
+	Browser             BrowserOptions
 }
 
 type LoginOptions struct {
@@ -68,19 +69,41 @@ type ParseOptions struct {
 }
 
 type MatchOptions struct {
-	SearchPages int
-	TopK        int
-	Workers     int
-	Profile     MatchProfile
-	Weights     *MatchWeights
+	SearchPages       int
+	TopK              int
+	Workers           int
+	Profile           MatchProfile
+	Weights           *MatchWeights
+	SearchIdentity    SearchIdentity
+	SearchBudget      int
+	SearchCachePolicy SearchCachePolicy
 }
 
 // CandidateSearchOptions controls ranking for one manual candidate search.
 type CandidateSearchOptions struct {
-	Limit   int
-	Profile MatchProfile
-	Weights *MatchWeights
+	Limit             int
+	Profile           MatchProfile
+	Weights           *MatchWeights
+	SearchIdentity    SearchIdentity
+	SearchCachePolicy SearchCachePolicy
 }
+
+// SearchIdentity selects the isolated Bilibili state used for search.
+type SearchIdentity string
+
+const (
+	SearchIdentityAnonymous SearchIdentity = "anonymous"
+	SearchIdentitySession   SearchIdentity = "session"
+)
+
+// SearchCachePolicy reserves per-call cache behavior for the persistent cache
+// introduced in Phase 2. Phase 1 treats the zero value as the in-memory default.
+type SearchCachePolicy string
+
+const (
+	SearchCacheDefault SearchCachePolicy = ""
+	SearchCacheBypass  SearchCachePolicy = "bypass"
+)
 
 type HTTPClients struct {
 	Kugou           *http.Client
@@ -113,6 +136,7 @@ type newOptions struct {
 	http             HTTPClients
 	clock            Clock
 	limiter          RateLimiter
+	searchLimiter    RateLimiter
 	storage          Storage
 	browserExtractor BrowserExtractor
 }
@@ -127,6 +151,12 @@ func WithClock(clock Clock) Option {
 
 func WithRateLimiter(limiter RateLimiter) Option {
 	return func(options *newOptions) error { options.limiter = limiter; return nil }
+}
+
+// WithSearchRateLimiter overrides only the limiter used by Bilibili search
+// and its identity-specific fingerprint/WBI setup requests.
+func WithSearchRateLimiter(limiter RateLimiter) Option {
+	return func(options *newOptions) error { options.searchLimiter = limiter; return nil }
 }
 
 func WithStorage(storage Storage) Option {

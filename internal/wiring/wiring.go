@@ -22,20 +22,22 @@ import (
 )
 
 type Options struct {
-	State            config.Options
-	LoadedState      *config.Config
-	RatePerSecond    float64
-	HTTPTimeout      time.Duration
-	Limiter          netx.Limiter
-	KugouHTTP        *http.Client
-	AppleMusicHTTP   *http.Client
-	AccountHTTP      *http.Client
-	SearchHTTP       *http.Client
-	Now              func() time.Time
-	Sleep            netx.Sleeper
-	CookieStore      bilibili.CookieStore
-	BrowserManager   *browser.Manager
-	BrowserExtractor playlist.BrowserExtractor
+	State               config.Options
+	LoadedState         *config.Config
+	RatePerSecond       float64
+	SearchRatePerSecond float64
+	HTTPTimeout         time.Duration
+	Limiter             netx.Limiter
+	SearchLimiter       netx.Limiter
+	KugouHTTP           *http.Client
+	AppleMusicHTTP      *http.Client
+	AccountHTTP         *http.Client
+	SearchHTTP          *http.Client
+	Now                 func() time.Time
+	Sleep               netx.Sleeper
+	CookieStore         bilibili.CookieStore
+	BrowserManager      *browser.Manager
+	BrowserExtractor    playlist.BrowserExtractor
 }
 
 type Components struct {
@@ -73,6 +75,18 @@ func New(options Options) (*Components, error) {
 	limiter := options.Limiter
 	if limiter == nil {
 		limiter = netx.NewTokenLimiter(options.RatePerSecond, 4)
+	}
+	searchLimiter := options.SearchLimiter
+	if searchLimiter == nil {
+		if options.Limiter != nil {
+			searchLimiter = options.Limiter
+		} else {
+			rate := options.SearchRatePerSecond
+			if rate <= 0 {
+				rate = 2
+			}
+			searchLimiter = netx.NewTokenLimiter(rate, 1)
+		}
 	}
 	timeout := options.HTTPTimeout
 	if timeout <= 0 {
@@ -112,15 +126,17 @@ func New(options Options) (*Components, error) {
 	}
 	coordinator := playlist.NewCoordinator(identification, optimizations, extractor)
 	bili, err := bilibili.New(bilibili.Config{
-		CookieFile:    state.CookieFile,
-		CookieStore:   options.CookieStore,
-		AccountHTTP:   options.AccountHTTP,
-		SearchHTTP:    options.SearchHTTP,
-		Limiter:       limiter,
-		Timeout:       timeout,
-		Now:           options.Now,
-		Sleep:         options.Sleep,
-		WriteInterval: 150 * time.Millisecond,
+		CookieFile:          state.CookieFile,
+		AnonymousCookieFile: state.AnonymousCookieFile,
+		CookieStore:         options.CookieStore,
+		AccountHTTP:         options.AccountHTTP,
+		SearchHTTP:          options.SearchHTTP,
+		Limiter:             limiter,
+		SearchLimiter:       searchLimiter,
+		Timeout:             timeout,
+		Now:                 options.Now,
+		Sleep:               options.Sleep,
+		WriteInterval:       150 * time.Millisecond,
 	})
 	if err != nil {
 		kugouHTTP.CloseIdleConnections()
@@ -224,8 +240,11 @@ func (a *bilibiliAdapter) Logout(ctx context.Context) error {
 	return a.client.Logout(ctx)
 }
 
-func (a *bilibiliAdapter) SearchVideos(ctx context.Context, query string, page, pageSize int) ([]model.Video, error) {
-	return a.client.Search(ctx, query, bilibili.SearchOptions{Page: page, PageSize: pageSize, SearchType: "video", Order: "totalrank"})
+func (a *bilibiliAdapter) SearchVideos(ctx context.Context, request service.SearchRequest) ([]model.Video, error) {
+	return a.client.Search(ctx, request.Keyword, bilibili.SearchOptions{
+		Page: request.Page, PageSize: request.PageSize, SearchType: "video", Order: "totalrank",
+		Identity: bilibili.SearchIdentity(request.Identity), CachePolicy: bilibili.SearchCachePolicy(request.CachePolicy),
+	})
 }
 
 func (a *bilibiliAdapter) VideoDetail(ctx context.Context, bvid string) (model.Video, error) {

@@ -31,14 +31,16 @@ func New(cfg Config, options ...Option) (*Engine, error) {
 		}
 	}
 	wiringOptions := wiring.Options{
-		State:          config.Options{Dir: cfg.ConfigDir, CacheDir: cfg.CacheDir},
-		RatePerSecond:  cfg.RatePerSecond,
-		HTTPTimeout:    cfg.HTTPTimeout,
-		Limiter:        resolved.limiter,
-		KugouHTTP:      resolved.http.Kugou,
-		AppleMusicHTTP: resolved.http.AppleMusic,
-		AccountHTTP:    resolved.http.BilibiliAccount,
-		SearchHTTP:     resolved.http.BilibiliSearch,
+		State:               config.Options{Dir: cfg.ConfigDir, CacheDir: cfg.CacheDir},
+		RatePerSecond:       cfg.RatePerSecond,
+		SearchRatePerSecond: cfg.SearchRatePerSecond,
+		HTTPTimeout:         cfg.HTTPTimeout,
+		Limiter:             resolved.limiter,
+		SearchLimiter:       resolved.searchLimiter,
+		KugouHTTP:           resolved.http.Kugou,
+		AppleMusicHTTP:      resolved.http.AppleMusic,
+		AccountHTTP:         resolved.http.BilibiliAccount,
+		SearchHTTP:          resolved.http.BilibiliSearch,
 	}
 	if resolved.clock != nil {
 		wiringOptions.Now = resolved.clock.Now
@@ -126,11 +128,14 @@ func (e *Engine) ParsePlaylistWithOptions(ctx context.Context, rawURL string, op
 func (e *Engine) Match(ctx context.Context, songs []Song, options MatchOptions, observer Observer) ([]MatchResult, error) {
 	internalSongs := songsToInternal(songs)
 	results, err := e.service.Match(ctx, internalSongs, service.MatchOptions{
-		SearchPages: options.SearchPages,
-		TopK:        options.TopK,
-		Workers:     options.Workers,
-		Profile:     service.MatchProfile(options.Profile),
-		Weights:     matchWeightsToInternal(options.Weights),
+		SearchPages:       options.SearchPages,
+		TopK:              options.TopK,
+		Workers:           options.Workers,
+		Profile:           service.MatchProfile(options.Profile),
+		Weights:           matchWeightsToInternal(options.Weights),
+		SearchIdentity:    service.SearchIdentity(options.SearchIdentity),
+		SearchBudget:      options.SearchBudget,
+		SearchCachePolicy: service.SearchCachePolicy(options.SearchCachePolicy),
 	}, observerAdapter(observer))
 	return outcomesFromInternal(results), wrapError(err)
 }
@@ -144,6 +149,7 @@ func (e *Engine) SearchCandidates(ctx context.Context, song Song, query string, 
 func (e *Engine) SearchCandidatesWithOptions(ctx context.Context, song Song, query string, options CandidateSearchOptions) ([]MatchResult, error) {
 	results, err := e.service.SearchCandidatesWithOptions(ctx, songToInternal(song), query, service.CandidateSearchOptions{
 		Limit: options.Limit, Profile: service.MatchProfile(options.Profile), Weights: matchWeightsToInternal(options.Weights),
+		SearchIdentity: service.SearchIdentity(options.SearchIdentity), SearchCachePolicy: service.SearchCachePolicy(options.SearchCachePolicy),
 	})
 	return candidatesFromInternal(results), wrapError(err)
 }

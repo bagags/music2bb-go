@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -34,7 +35,8 @@ type fakeRemote struct {
 	addErr    error
 }
 
-func (f *fakeRemote) SearchVideos(ctx context.Context, keyword string, _, _ int) ([]model.Video, error) {
+func (f *fakeRemote) SearchVideos(ctx context.Context, request SearchRequest) ([]model.Video, error) {
+	keyword := request.Keyword
 	active := f.active.Add(1)
 	defer f.active.Add(-1)
 	for {
@@ -134,10 +136,11 @@ func (fakeMatcher) Decide(song model.Song, ranked []model.MatchResult, final boo
 }
 
 type scriptedSearch struct {
-	mu      sync.Mutex
-	queries []string
-	results map[string][]model.Video
-	errs    map[string]error
+	mu       sync.Mutex
+	queries  []string
+	requests []SearchRequest
+	results  map[string][]model.Video
+	errs     map[string]error
 }
 
 type ambiguityStrategy struct{}
@@ -181,7 +184,7 @@ type rejectingSearch struct {
 	calls atomic.Int32
 }
 
-func (s *rejectingSearch) SearchVideos(ctx context.Context, _ string, _, _ int) ([]model.Video, error) {
+func (s *rejectingSearch) SearchVideos(ctx context.Context, _ SearchRequest) ([]model.Video, error) {
 	if s.calls.Add(1) == 1 {
 		return nil, batchFatalSearchError{}
 	}
@@ -193,7 +196,7 @@ func (*rejectingSearch) VideoDetail(context.Context, string) (model.Video, error
 	return model.Video{}, nil
 }
 
-func (s *burstSearch) SearchVideos(context.Context, string, int, int) ([]model.Video, error) {
+func (s *burstSearch) SearchVideos(context.Context, SearchRequest) ([]model.Video, error) {
 	if s.ready.Add(1) == s.total {
 		s.once.Do(func() { close(s.release) })
 	}
@@ -205,15 +208,23 @@ func (*burstSearch) VideoDetail(context.Context, string) (model.Video, error) {
 	return model.Video{}, nil
 }
 
-func (s *scriptedSearch) SearchVideos(_ context.Context, keyword string, _, _ int) ([]model.Video, error) {
+func (s *scriptedSearch) SearchVideos(_ context.Context, request SearchRequest) ([]model.Video, error) {
+	keyword := request.Keyword
 	s.mu.Lock()
 	s.queries = append(s.queries, keyword)
+	s.requests = append(s.requests, request)
 	s.mu.Unlock()
 	if err := s.errs[keyword]; err != nil {
 		return nil, err
 	}
 	return append([]model.Video(nil), s.results[keyword]...), nil
 }
+
+type riskSearchError struct{ reason string }
+
+func (e riskSearchError) Error() string             { return "risk controlled" }
+func (e riskSearchError) BatchFatal() bool          { return true }
+func (e riskSearchError) RiskControlReason() string { return e.reason }
 
 func (s *scriptedSearch) VideoDetail(context.Context, string) (model.Video, error) {
 	return model.Video{}, nil
@@ -343,6 +354,107 @@ func TestMatchTopKDoesNotHideAmbiguityFromDecision(t *testing.T) {
 	}
 	if len(outcomes[0].Candidates) != 1 {
 		t.Fatalf("retained candidates = %d, want top-k 1", len(outcomes[0].Candidates))
+	}
+}
+
+func TestMatchTopKDoesNotChangeRemoteRequestCount(t *testing.T) {
+	for _, topK := range []int{3, 5, 10} {
+		search := &scriptedSearch{results: map[string][]model.Video{
+			"Song Artist": {{BVID: "safe", Title: "Song - Artist", Uploader: "music"}},
+		}}
+		account := &fakeRemote{}
+		engine, err := New(Dependencies{Playlist: fakePlaylist{}, Match: search, Account: account, Strategy: fakeMatcher{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		outcomes, matchErr := engine.Match(context.Background(), []model.Song{{Name: "Song", Artist: "Artist"}}, MatchOptions{
+			Workers: 1, SearchPages: 3, TopK: topK, SearchBudget: 4,
+		}, nil)
+		if matchErr != nil || !outcomes[0].HasSelection {
+			t.Fatalf("topK %d outcome = %#v, %v", topK, outcomes, matchErr)
+		}
+		if got := len(search.requests); got != 1 {
+			t.Fatalf("topK %d requests = %d, want 1", topK, got)
+		}
+	}
+}
+
+func TestMatchUsesPageWidthOrderAndPerSongBudget(t *testing.T) {
+	search := &scriptedSearch{results: map[string][]model.Video{
+		"Song Artist": {{BVID: "wrong-a", Title: "Song", Uploader: "Other"}},
+		"Song":        {{BVID: "wrong-b", Title: "Song", Uploader: "Other"}},
+	}}
+	account := &fakeRemote{}
+	engine, err := New(Dependencies{Playlist: fakePlaylist{}, Match: search, Account: account, Strategy: fakeMatcher{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcomes, matchErr := engine.Match(context.Background(), []model.Song{{Name: "Song", Artist: "Artist"}}, MatchOptions{
+		Workers: 1, SearchPages: 3, TopK: 10, SearchBudget: 4,
+	}, nil)
+	if matchErr != nil {
+		t.Fatal(matchErr)
+	}
+	if outcomes[0].RemoteRequests != 4 || outcomes[0].SearchStatus != SearchStatusBudgetExhausted || outcomes[0].ReviewReason != model.ReviewBudgetExhausted {
+		t.Fatalf("budgeted outcome = %#v", outcomes[0])
+	}
+	want := []SearchRequest{
+		{Keyword: "Song Artist", Page: 1, PageSize: 20, Identity: SearchIdentityAnonymous},
+		{Keyword: "Song", Page: 1, PageSize: 20, Identity: SearchIdentityAnonymous},
+		{Keyword: "Song Artist", Page: 2, PageSize: 20, Identity: SearchIdentityAnonymous},
+		{Keyword: "Song", Page: 2, PageSize: 20, Identity: SearchIdentityAnonymous},
+	}
+	if !reflect.DeepEqual(search.requests, want) {
+		t.Fatalf("requests = %#v, want %#v", search.requests, want)
+	}
+}
+
+func TestMatchRiskControlPreservesCompletedAndMarksUnsearched(t *testing.T) {
+	search := &scriptedSearch{
+		results: map[string][]model.Video{"safe Artist": {{BVID: "safe", Title: "safe Artist"}}},
+		errs:    map[string]error{"risk Artist": riskSearchError{reason: string(RiskControlVoucher)}},
+	}
+	account := &fakeRemote{}
+	engine, err := New(Dependencies{Playlist: fakePlaylist{}, Match: search, Account: account, Strategy: fakeMatcher{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	songs := []model.Song{{Name: "safe", Artist: "Artist"}, {Name: "risk", Artist: "Artist"}, {Name: "later", Artist: "Artist"}}
+	outcomes, matchErr := engine.Match(context.Background(), songs, MatchOptions{Workers: 1, SearchPages: 3, SearchBudget: 4}, nil)
+	var batch *BatchError
+	if !errors.As(matchErr, &batch) || batch.HaltReason != RiskControlVoucher || batch.SearchIdentity != SearchIdentityAnonymous {
+		t.Fatalf("risk error = %T %#v", matchErr, matchErr)
+	}
+	if !outcomes[0].HasSelection || outcomes[0].SearchStatus != SearchStatusCompleted {
+		t.Fatalf("completed outcome = %#v", outcomes[0])
+	}
+	if outcomes[1].SearchStatus != SearchStatusRiskControl || outcomes[1].ReviewReason != model.ReviewRiskControl {
+		t.Fatalf("risk outcome = %#v", outcomes[1])
+	}
+	if outcomes[2].SearchStatus != SearchStatusNotSearched || outcomes[2].Failure != nil {
+		t.Fatalf("unsearched outcome = %#v", outcomes[2])
+	}
+}
+
+func TestMatchRiskControlRetainsPreviouslyFetchedCandidatesForOfflineReview(t *testing.T) {
+	search := &scriptedSearch{
+		results: map[string][]model.Video{"Song Artist": {{BVID: "review", Title: "Song", Uploader: "Other"}}},
+		errs:    map[string]error{"Song": riskSearchError{reason: string(RiskControlCode412)}},
+	}
+	account := &fakeRemote{}
+	engine, err := New(Dependencies{Playlist: fakePlaylist{}, Match: search, Account: account, Strategy: fakeMatcher{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcomes, matchErr := engine.Match(context.Background(), []model.Song{{Name: "Song", Artist: "Artist"}}, MatchOptions{
+		Workers: 1, SearchPages: 3, SearchBudget: 4, SearchIdentity: SearchIdentitySession,
+	}, nil)
+	var batch *BatchError
+	if !errors.As(matchErr, &batch) || batch.HaltReason != RiskControlCode412 {
+		t.Fatalf("risk error = %T %#v", matchErr, matchErr)
+	}
+	if len(outcomes[0].Candidates) != 1 || outcomes[0].Candidates[0].Video == nil || outcomes[0].Candidates[0].Video.BVID != "review" {
+		t.Fatalf("offline candidates = %#v", outcomes[0])
 	}
 }
 

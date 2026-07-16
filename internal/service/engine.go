@@ -99,6 +99,9 @@ func (e *Engine) Match(ctx context.Context, songs []model.Song, opts MatchOption
 		return nil, err
 	}
 	opts = opts.normalized()
+	if opts.SearchIdentity != SearchIdentityAnonymous && opts.SearchIdentity != SearchIdentitySession {
+		return nil, &OperationError{Category: ErrorInvalidInput, Operation: "match", Message: fmt.Sprintf("unknown search identity %q", opts.SearchIdentity)}
+	}
 	if opts.Workers > len(songs) {
 		opts.Workers = len(songs)
 	}
@@ -107,7 +110,10 @@ func (e *Engine) Match(ctx context.Context, songs []model.Song, opts MatchOption
 	updates := serial(observer, e.now)
 	outcomes := make([]MatchOutcome, len(songs))
 	for index, song := range songs {
-		outcomes[index] = MatchOutcome{Song: song, NeedsReview: true, ReviewReason: model.ReviewSearchFailed}
+		outcomes[index] = MatchOutcome{
+			Song: song, NeedsReview: true, ReviewReason: model.ReviewNotSearched,
+			SearchIdentity: opts.SearchIdentity, SearchStatus: SearchStatusNotSearched,
+		}
 	}
 	jobs := make(chan int)
 	var progressMu sync.Mutex
@@ -140,6 +146,10 @@ func (e *Engine) Match(ctx context.Context, songs []model.Song, opts MatchOption
 
 	feedCancelled := false
 	for index := range songs {
+		if matchCtx.Err() != nil {
+			feedCancelled = true
+			break
+		}
 		select {
 		case jobs <- index:
 		case <-matchCtx.Done():
@@ -155,6 +165,12 @@ func (e *Engine) Match(ctx context.Context, songs []model.Song, opts MatchOption
 		return outcomes, classifyContext("match", ErrorCancelled, err)
 	}
 
+	cause := context.Cause(matchCtx)
+	if reason := riskControlReason(cause); reason != "" {
+		return outcomes, &BatchError{
+			Category: ErrorNetwork, HaltReason: reason, SearchIdentity: opts.SearchIdentity,
+		}
+	}
 	failures := make([]ItemFailure, 0)
 	for _, outcome := range outcomes {
 		if outcome.Failure != nil {
@@ -168,76 +184,139 @@ func (e *Engine) Match(ctx context.Context, songs []model.Song, opts MatchOption
 }
 
 func (e *Engine) matchSong(ctx context.Context, strategy MatchStrategy, song model.Song, opts MatchOptions) (MatchOutcome, error) {
-	outcome := MatchOutcome{Song: song}
-	phases := strategy.QueryPhases(song)
+	outcome := MatchOutcome{
+		Song: song, NeedsReview: true, ReviewReason: model.ReviewNotSearched,
+		SearchIdentity: opts.SearchIdentity, SearchStatus: SearchStatusNotSearched,
+	}
+	queries := flattenQueries(strategy.QueryPhases(song))
 	allVideos := make([]model.Video, 0)
 	seenVideos := make(map[string]struct{})
 	var lastSearchErr error
-	for phaseIndex, phase := range phases {
-		for _, query := range uniqueStrings(phase.Queries) {
-			if strings.TrimSpace(query) == "" {
-				continue
+	totalPlanned := len(queries) * opts.SearchPages
+	for page := 1; page <= opts.SearchPages && outcome.RemoteRequests < opts.SearchBudget; page++ {
+		for _, query := range queries {
+			if outcome.RemoteRequests >= opts.SearchBudget {
+				break
 			}
-			for page := 1; page <= opts.SearchPages; page++ {
-				pageVideos, err := e.match.SearchVideos(ctx, query, page, 20)
-				if err != nil {
-					lastSearchErr = err
-					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-						cause := context.Cause(ctx)
-						if cause != nil && !errors.Is(cause, context.Canceled) && !errors.Is(cause, context.DeadlineExceeded) {
-							outcome.NeedsReview = true
-							outcome.ReviewReason = model.ReviewSearchFailed
-							return outcome, nil
-						}
-						outcome.Failure = &ItemFailure{Operation: "search", Item: song.Name, Reason: err.Error()}
-						outcome.NeedsReview = true
-						outcome.ReviewReason = model.ReviewSearchFailed
+			outcome.RemoteRequests++
+			pageVideos, err := e.match.SearchVideos(ctx, SearchRequest{
+				Keyword: query, Page: page, PageSize: 20, Identity: opts.SearchIdentity, CachePolicy: opts.SearchCachePolicy,
+			})
+			if err != nil {
+				lastSearchErr = err
+				if reason := riskControlReason(err); reason != "" {
+					outcome.Candidates = retainCandidates(strategy.Rank(song, append([]model.Video(nil), allVideos...), len(allVideos)), opts.TopK)
+					outcome.SearchStatus = SearchStatusRiskControl
+					outcome.ReviewReason = model.ReviewRiskControl
+					outcome.RiskReason = reason
+					return outcome, err
+				}
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					cause := context.Cause(ctx)
+					if cause != nil && !errors.Is(cause, context.Canceled) && !errors.Is(cause, context.DeadlineExceeded) {
+						outcome.Candidates = retainCandidates(strategy.Rank(song, append([]model.Video(nil), allVideos...), len(allVideos)), opts.TopK)
+						outcome.SearchStatus = SearchStatusNotSearched
+						outcome.ReviewReason = model.ReviewNotSearched
 						return outcome, nil
 					}
-					if isBatchFatal(err) {
-						outcome.Failure = &ItemFailure{Operation: "search", Item: song.Name, Reason: err.Error()}
-						outcome.NeedsReview = true
-						outcome.ReviewReason = model.ReviewSearchFailed
-						return outcome, err
-					}
+					outcome.Failure = &ItemFailure{Operation: "search", Item: song.Name, Reason: err.Error()}
+					outcome.NeedsReview = true
+					outcome.ReviewReason = model.ReviewSearchFailed
+					outcome.SearchStatus = SearchStatusFailed
+					return outcome, nil
+				}
+				if isBatchFatal(err) {
+					outcome.Failure = &ItemFailure{Operation: "search", Item: song.Name, Reason: err.Error()}
+					outcome.NeedsReview = true
+					outcome.ReviewReason = model.ReviewSearchFailed
+					outcome.SearchStatus = SearchStatusFailed
+					return outcome, err
+				}
+				continue
+			}
+			for _, video := range pageVideos {
+				key := video.BVID
+				if key == "" {
+					key = video.Title + "\x00" + video.Uploader
+				}
+				if _, ok := seenVideos[key]; ok {
 					continue
 				}
-				for _, video := range pageVideos {
-					key := video.BVID
-					if key == "" {
-						key = video.Title + "\x00" + video.Uploader
-					}
-					if _, ok := seenVideos[key]; ok {
-						continue
-					}
-					seenVideos[key] = struct{}{}
-					allVideos = append(allVideos, video)
-				}
+				seenVideos[key] = struct{}{}
+				allVideos = append(allVideos, video)
 			}
-		}
-		ranked := strategy.Rank(song, append([]model.Video(nil), allVideos...), len(allVideos))
-		decision := strategy.Decide(song, ranked, phaseIndex == len(phases)-1)
-		outcome.Candidates = retainCandidates(ranked, opts.TopK)
-		if decision.SelectedIndex >= 0 && decision.SelectedIndex < len(ranked) {
-			outcome.Selected = ranked[decision.SelectedIndex]
-			outcome.HasSelection = outcome.Selected.Video != nil
-			return outcome, nil
-		}
-		outcome.ReviewReason = decision.ReviewReason
-		if !decision.Continue {
-			break
+			ranked := strategy.Rank(song, append([]model.Video(nil), allVideos...), len(allVideos))
+			decision := strategy.Decide(song, ranked, false)
+			outcome.Candidates = retainCandidates(ranked, opts.TopK)
+			if decision.SelectedIndex >= 0 && decision.SelectedIndex < len(ranked) {
+				outcome.Selected = ranked[decision.SelectedIndex]
+				outcome.HasSelection = outcome.Selected.Video != nil
+				outcome.NeedsReview = !outcome.HasSelection
+				outcome.ReviewReason = model.ReviewNone
+				outcome.SearchStatus = SearchStatusCompleted
+				return outcome, nil
+			}
+			outcome.ReviewReason = decision.ReviewReason
 		}
 	}
-	if len(outcome.Candidates) == 0 {
-		if lastSearchErr != nil {
-			outcome.Failure = &ItemFailure{Operation: "search", Item: song.Name, Reason: lastSearchErr.Error()}
-			outcome.ReviewReason = model.ReviewSearchFailed
-		} else {
-			outcome.ReviewReason = model.ReviewNoCandidates
-		}
+	ranked := strategy.Rank(song, append([]model.Video(nil), allVideos...), len(allVideos))
+	decision := strategy.Decide(song, ranked, true)
+	outcome.Candidates = retainCandidates(ranked, opts.TopK)
+	if decision.SelectedIndex >= 0 && decision.SelectedIndex < len(ranked) {
+		outcome.Selected = ranked[decision.SelectedIndex]
+		outcome.HasSelection = outcome.Selected.Video != nil
+		outcome.NeedsReview = !outcome.HasSelection
+		outcome.ReviewReason = model.ReviewNone
+		outcome.SearchStatus = SearchStatusCompleted
+		return outcome, nil
+	}
+	outcome.ReviewReason = decision.ReviewReason
+	if lastSearchErr != nil && len(outcome.Candidates) == 0 {
+		outcome.Failure = &ItemFailure{Operation: "search", Item: song.Name, Reason: lastSearchErr.Error()}
+		outcome.ReviewReason = model.ReviewSearchFailed
+		outcome.SearchStatus = SearchStatusFailed
+	} else if outcome.RemoteRequests >= opts.SearchBudget && opts.SearchBudget < totalPlanned {
+		outcome.ReviewReason = model.ReviewBudgetExhausted
+		outcome.SearchStatus = SearchStatusBudgetExhausted
+	} else if len(outcome.Candidates) == 0 {
+		outcome.ReviewReason = model.ReviewNoCandidates
+		outcome.SearchStatus = SearchStatusCompleted
+	} else {
+		outcome.SearchStatus = SearchStatusCompleted
 	}
 	outcome.NeedsReview = true
 	return outcome, nil
+}
+
+func flattenQueries(phases []QueryPhase) []string {
+	queries := make([]string, 0)
+	for _, phase := range phases {
+		for _, query := range phase.Queries {
+			query = strings.TrimSpace(query)
+			if query != "" && !containsString(queries, query) {
+				queries = append(queries, query)
+			}
+		}
+	}
+	return queries
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func riskControlReason(err error) RiskControlReason {
+	type riskControlled interface{ RiskControlReason() string }
+	var risk riskControlled
+	if errors.As(err, &risk) {
+		return RiskControlReason(risk.RiskControlReason())
+	}
+	return ""
 }
 
 func isBatchFatal(err error) bool {
@@ -270,9 +349,20 @@ func (e *Engine) SearchCandidatesWithOptions(ctx context.Context, song model.Son
 	if options.Limit < 1 {
 		options.Limit = 10
 	}
-	videos, err := e.match.SearchVideos(ctx, query, 1, options.Limit)
+	if options.SearchIdentity == "" {
+		options.SearchIdentity = SearchIdentityAnonymous
+	}
+	if options.SearchIdentity != SearchIdentityAnonymous && options.SearchIdentity != SearchIdentitySession {
+		return nil, &OperationError{Category: ErrorInvalidInput, Operation: "search", Message: fmt.Sprintf("unknown search identity %q", options.SearchIdentity)}
+	}
+	videos, err := e.match.SearchVideos(ctx, SearchRequest{
+		Keyword: query, Page: 1, PageSize: options.Limit, Identity: options.SearchIdentity, CachePolicy: options.SearchCachePolicy,
+	})
 	if err != nil {
-		return nil, classifyContext("search", ErrorNetwork, err)
+		return nil, &OperationError{
+			Category: ErrorNetwork, Operation: "search", Err: err,
+			RiskReason: riskControlReason(err), SearchIdentity: options.SearchIdentity,
+		}
 	}
 	return strategy.Rank(song, videos, len(videos)), nil
 }

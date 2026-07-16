@@ -105,6 +105,11 @@ func outcomesFromInternal(outcomes []service.MatchOutcome) []MatchResult {
 		converted.ManualOverride = outcome.ManualOverride || converted.ManualOverride
 		converted.NeedsReview = outcome.NeedsReview
 		converted.ReviewReason = ReviewReason(outcome.ReviewReason)
+		converted.SearchIdentity = SearchIdentity(outcome.SearchIdentity)
+		converted.SearchStatus = SearchStatus(outcome.SearchStatus)
+		converted.RemoteRequests = outcome.RemoteRequests
+		converted.CacheHits = outcome.CacheHits
+		converted.RiskReason = RiskControlReason(outcome.RiskReason)
 		converted.Candidates = candidatesFromInternal(outcome.Candidates)
 		if outcome.Failure != nil {
 			converted.Failure = &ItemFailure{Index: outcome.Failure.Index, Operation: outcome.Failure.Operation, Item: outcome.Failure.Item, Reason: outcome.Failure.Reason}
@@ -119,8 +124,12 @@ func outcomeToInternal(match MatchResult) service.MatchOutcome {
 	outcome := service.MatchOutcome{
 		Song: songToInternal(match.Song), Selected: candidate,
 		HasSelection: match.HasSelection, ManualOverride: match.ManualOverride,
-		NeedsReview:  match.NeedsReview,
-		ReviewReason: model.ReviewReason(match.ReviewReason),
+		NeedsReview:    match.NeedsReview,
+		ReviewReason:   model.ReviewReason(match.ReviewReason),
+		SearchIdentity: service.SearchIdentity(match.SearchIdentity),
+		SearchStatus:   service.SearchStatus(match.SearchStatus),
+		RemoteRequests: match.RemoteRequests, CacheHits: match.CacheHits,
+		RiskReason: service.RiskControlReason(match.RiskReason),
 	}
 	if match.Failure != nil {
 		outcome.Failure = &service.ItemFailure{Index: match.Failure.Index, Operation: match.Failure.Operation, Item: match.Failure.Item, Reason: match.Failure.Reason}

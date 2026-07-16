@@ -36,11 +36,14 @@ const (
 )
 
 type MatchOptions struct {
-	SearchPages int
-	TopK        int
-	Workers     int
-	Profile     MatchProfile
-	Weights     *MatchWeights
+	SearchPages       int
+	TopK              int
+	Workers           int
+	Profile           MatchProfile
+	Weights           *MatchWeights
+	SearchIdentity    SearchIdentity
+	SearchBudget      int
+	SearchCachePolicy SearchCachePolicy
 }
 
 type MatchProfile string
@@ -60,20 +63,61 @@ type MatchWeights struct {
 }
 
 type CandidateSearchOptions struct {
-	Limit   int
-	Profile MatchProfile
-	Weights *MatchWeights
+	Limit             int
+	Profile           MatchProfile
+	Weights           *MatchWeights
+	SearchIdentity    SearchIdentity
+	SearchCachePolicy SearchCachePolicy
 }
+
+type SearchIdentity string
+
+const (
+	SearchIdentityAnonymous SearchIdentity = "anonymous"
+	SearchIdentitySession   SearchIdentity = "session"
+)
+
+type SearchCachePolicy string
+
+const (
+	SearchCacheDefault SearchCachePolicy = ""
+	SearchCacheBypass  SearchCachePolicy = "bypass"
+)
+
+type SearchStatus string
+
+const (
+	SearchStatusCompleted       SearchStatus = "completed"
+	SearchStatusRiskControl     SearchStatus = "risk_control"
+	SearchStatusNotSearched     SearchStatus = "not_searched"
+	SearchStatusBudgetExhausted SearchStatus = "budget_exhausted"
+	SearchStatusFailed          SearchStatus = "failed"
+)
+
+type RiskControlReason string
+
+const (
+	RiskControlVoucher  RiskControlReason = "voucher"
+	RiskControlHTTP412  RiskControlReason = "http_412"
+	RiskControlCode412  RiskControlReason = "code_-412"
+	RiskControlCode1200 RiskControlReason = "code_-1200"
+)
 
 func (o MatchOptions) normalized() MatchOptions {
 	if o.SearchPages < 1 {
 		o.SearchPages = 3
 	}
 	if o.TopK < 1 {
-		o.TopK = 3
+		o.TopK = 5
 	}
 	if o.Workers < 1 {
-		o.Workers = 4
+		o.Workers = 2
+	}
+	if o.SearchBudget < 1 {
+		o.SearchBudget = 4
+	}
+	if o.SearchIdentity == "" {
+		o.SearchIdentity = SearchIdentityAnonymous
 	}
 	return o
 }
@@ -87,6 +131,11 @@ type MatchOutcome struct {
 	ManualOverride bool
 	NeedsReview    bool
 	ReviewReason   model.ReviewReason
+	SearchIdentity SearchIdentity
+	SearchStatus   SearchStatus
+	RemoteRequests int
+	CacheHits      int
+	RiskReason     RiskControlReason
 }
 
 type QueryPhase struct {
@@ -127,8 +176,16 @@ type PlaylistClient interface {
 }
 
 type MatchClient interface {
-	SearchVideos(ctx context.Context, keyword string, page, pageSize int) ([]model.Video, error)
+	SearchVideos(ctx context.Context, request SearchRequest) ([]model.Video, error)
 	VideoDetail(ctx context.Context, bvid string) (model.Video, error)
+}
+
+type SearchRequest struct {
+	Keyword     string
+	Page        int
+	PageSize    int
+	Identity    SearchIdentity
+	CachePolicy SearchCachePolicy
 }
 
 type AccountClient interface {

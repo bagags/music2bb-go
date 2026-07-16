@@ -76,6 +76,9 @@ const (
 	ReviewWeakTitle        ReviewReason = "weak_title"
 	ReviewArtistUnverified ReviewReason = "artist_unverified"
 	ReviewAmbiguous        ReviewReason = "ambiguous"
+	ReviewRiskControl      ReviewReason = "risk_control"
+	ReviewNotSearched      ReviewReason = "not_searched"
+	ReviewBudgetExhausted  ReviewReason = "budget_exhausted"
 )
 
 // Favorite is a Bilibili favorites folder.

@@ -24,10 +24,12 @@ const (
 )
 
 type Error struct {
-	Category  ErrorCategory
-	Operation string
-	Message   string
-	Err       error
+	Category       ErrorCategory
+	Operation      string
+	Message        string
+	Err            error
+	RiskReason     RiskControlReason
+	SearchIdentity SearchIdentity
 }
 
 func (e *Error) Error() string {
@@ -47,11 +49,16 @@ func (e *Error) Error() string {
 func (e *Error) Unwrap() error { return e.Err }
 
 type BatchError struct {
-	Category ErrorCategory
-	Failures []ItemFailure
+	Category       ErrorCategory
+	Failures       []ItemFailure
+	HaltReason     RiskControlReason
+	SearchIdentity SearchIdentity
 }
 
 func (e *BatchError) Error() string {
+	if e.HaltReason != "" {
+		return fmt.Sprintf("%s: search halted for %s identity (%s)", e.Category, e.SearchIdentity, e.HaltReason)
+	}
 	return fmt.Sprintf("%s: %d item(s) failed", e.Category, len(e.Failures))
 }
 
@@ -77,10 +84,12 @@ func wrapError(err error) error {
 	var operation *service.OperationError
 	if errors.As(err, &operation) {
 		return &Error{
-			Category:  categoryFromService(operation.Category),
-			Operation: operation.Operation,
-			Message:   operation.Message,
-			Err:       operation.Err,
+			Category:       categoryFromService(operation.Category),
+			Operation:      operation.Operation,
+			Message:        operation.Message,
+			Err:            operation.Err,
+			RiskReason:     RiskControlReason(operation.RiskReason),
+			SearchIdentity: SearchIdentity(operation.SearchIdentity),
 		}
 	}
 	var batch *service.BatchError
@@ -89,7 +98,10 @@ func wrapError(err error) error {
 		for index, failure := range batch.Failures {
 			failures[index] = ItemFailure{Index: failure.Index, Operation: failure.Operation, Item: failure.Item, Reason: failure.Reason}
 		}
-		return &BatchError{Category: categoryFromService(batch.Category), Failures: failures}
+		return &BatchError{
+			Category: categoryFromService(batch.Category), Failures: failures,
+			HaltReason: RiskControlReason(batch.HaltReason), SearchIdentity: SearchIdentity(batch.SearchIdentity),
+		}
 	}
 	return &Error{Category: ErrorInternal, Err: err}
 }

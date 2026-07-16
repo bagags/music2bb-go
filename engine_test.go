@@ -122,6 +122,19 @@ func newTestEngine(t *testing.T, searchTransport http.RoundTripper, options ...O
 	if searchTransport == nil {
 		searchTransport = searchRoundTripper(0)
 	}
+	searchAPITransport := searchTransport
+	searchTransport = roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		switch request.URL.Path {
+		case "/":
+			response := jsonResponse(`{}`)
+			response.Header.Add("Set-Cookie", "buvid3=anonymous-device; Path=/")
+			return response, nil
+		case "/x/web-interface/nav":
+			return jsonResponse(`{"code":-101,"message":"账号未登录","data":{"isLogin":false,"wbi_img":{"img_url":"https://i/imgkey.png","sub_url":"https://i/subkey.png"}}}`), nil
+		default:
+			return searchAPITransport.RoundTrip(request)
+		}
+	})
 	root := t.TempDir()
 	base := []Option{
 		WithStorage(testStorage()),
@@ -185,6 +198,21 @@ func TestInjectedBrowserStorageClockHTTPAndLimiter(t *testing.T) {
 	}
 	if limiter.calls.Load() == 0 {
 		t.Fatal("injected limiter was not used")
+	}
+}
+
+func TestInjectedSearchLimiterIsIndependent(t *testing.T) {
+	general := &countingLimiter{}
+	search := &countingLimiter{}
+	engine := newTestEngine(t, nil, WithRateLimiter(general), WithSearchRateLimiter(search))
+	if _, err := engine.SearchCandidates(context.Background(), Song{Name: "song"}, "query", 10); err != nil {
+		t.Fatal(err)
+	}
+	if search.calls.Load() == 0 {
+		t.Fatal("search limiter was not used")
+	}
+	if general.calls.Load() != 0 {
+		t.Fatalf("general limiter handled %d search request(s)", general.calls.Load())
 	}
 }
 
@@ -646,7 +674,21 @@ func TestPublicMatchScoresExposeTitleArtistAndKeywordAlias(t *testing.T) {
 	}
 }
 
-func TestClassicalMatchReachesTitleFallbackAndAcceptsDifferentRecording(t *testing.T) {
+func TestCandidateSearchExposesTypedRiskControlReason(t *testing.T) {
+	transport := roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return jsonResponse(`{"code":-412,"message":"request was banned","data":{}}`), nil
+	})
+	engine := newTestEngine(t, transport, WithRateLimiter(&countingLimiter{}))
+	_, err := engine.SearchCandidatesWithOptions(context.Background(), Song{Name: "song"}, "query", CandidateSearchOptions{
+		Limit: 10, SearchIdentity: SearchIdentityAnonymous,
+	})
+	var operation *Error
+	if !errors.As(err, &operation) || operation.RiskReason != RiskControlCode412 || operation.SearchIdentity != SearchIdentityAnonymous {
+		t.Fatalf("search risk error = %T %#v", err, err)
+	}
+}
+
+func TestClassicalMatchStartsWithTitleAndStopsAtHighConfidence(t *testing.T) {
 	var mu sync.Mutex
 	var queries []string
 	transport := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
@@ -671,7 +713,7 @@ func TestClassicalMatchReachesTitleFallbackAndAcceptsDifferentRecording(t *testi
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if got, want := fmt.Sprint(queries), "[Moon Light Sonata Right Artist Moon Light Sonata]"; got != want {
+	if got, want := fmt.Sprint(queries), "[Moon Light Sonata]"; got != want {
 		t.Fatalf("queries = %s, want %s", got, want)
 	}
 }
