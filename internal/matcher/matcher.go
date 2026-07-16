@@ -11,6 +11,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/bagags/music2bb-go/internal/catalogue"
 	"github.com/bagags/music2bb-go/internal/model"
 	"github.com/bagags/music2bb-go/internal/service"
 )
@@ -120,6 +121,9 @@ func normalizeWeights(weights service.MatchWeights) (service.MatchWeights, error
 
 // ComputeTitleScore calculates song/title similarity on the 0-100 scale.
 func (m *Matcher) ComputeTitleScore(song model.Song, video model.Video) float64 {
+	if m.profile == service.MatchProfileClassical && catalogue.SharedReference(song.Name, video.Title) {
+		return 100
+	}
 	return similarityScore(song.Name, video.Title)
 }
 

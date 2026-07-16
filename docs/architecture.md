@@ -15,6 +15,7 @@ cmd/music2bb
     ├── internal/wiring
     ├── internal/model
     ├── internal/config
+    ├── internal/catalogue
     ├── internal/playlist
     ├── internal/applemusic
     ├── internal/bilibili
@@ -55,6 +56,7 @@ consumers outside this module.
 | `internal/bilibili` | Authentication, search, WBI signing, cookies, and favorite operations |
 | `internal/browser` | Bundled/downloaded Chromium verification, lazy installation, and provider-neutral dynamic-page candidate extraction |
 | `internal/config` | State paths, embedded matcher defaults, and one-time legacy-state migration |
+| `internal/catalogue` | Embedded versioned classical-catalogue symbols, strict registry validation, and normalized reference parsing |
 | `internal/netx` | Shared HTTP retry, concurrency, and rate-limit behavior |
 
 ## Public and internal data
@@ -73,6 +75,14 @@ stop or continue. Standard mode may stop after exact artist evidence; classical
 mode always aggregates the title-only fallback. Both apply profile-specific
 title, total-score, and runner-up thresholds, and every unresolved outcome
 carries a public review reason.
+
+The classical scorer also consults the dependency-free `internal/catalogue`
+parser. When the source song name and candidate title contain the same complete
+catalogue reference, the title component becomes 100 before the configured six
+weights are applied. Standard scoring never invokes this boost, and a catalogue
+mismatch leaves the existing similarity score unchanged. Registry provenance,
+versioning, and the strict identifier grammar are documented in
+[`classical-catalogues.md`](classical-catalogues.md).
 
 The CLI's full-screen and plain frontends share one conversion session for
 login, Chromium installation/retry, parsing, matching, manual search, favorite

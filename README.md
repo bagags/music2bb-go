@@ -103,7 +103,7 @@ music2bb convert '<playlist-url>' --top-k 5 --manual-review
 
 每个候选的标题、歌手、音质、官方来源、热度和 UP 主分量都在 0–100 范围内，再按当前配置计算加权平均。`standard` 是默认配置，权重依次为 40、25、10、10、10、5；它先执行包含歌手和已知别名的查询，标题匹配通过且歌手分为 100 时可以提前选择，否则继续聚合纯标题回退。最终选择要求标题分至少为 70、总分至少为 35，且比第二名领先至少 5 分。
 
-`classical` 使用 55、10、10、10、10、5，更强调作品标题并允许不同演奏者或录音。它始终执行并聚合纯标题回退，不因歌手证据提前结束；最终标题分下限仍为 70，总分下限提高为 45，领先要求仍为 5 分。相近录音会以 `ambiguous` 进入审核。可通过 `--match-profile classical` 为一次转换启用，不做自动识别或持久化默认。
+`classical` 使用 55、10、10、10、10、5，更强调作品标题并允许不同演奏者或录音。曲名与候选标题包含同一个完整古典作品目录编号（例如 `BWV 1007`、`Hob. XVI:52`）时，标题分提升为 100；编号不同不会扣减原有相似度。它始终执行并聚合纯标题回退，不因歌手证据提前结束；最终标题分下限仍为 70，总分下限提高为 45，领先要求仍为 5 分。相近录音会以 `ambiguous` 进入审核。可通过 `--match-profile classical` 为一次转换启用，不做自动识别或持久化默认。内置目录符号表的来源、版本和解析规则见 [`docs/classical-catalogues.md`](docs/classical-catalogues.md)。
 
 所有未自动解决的歌曲都必须选择或跳过。公共 `MatchResult.ReviewReason` 会给出 `no_candidates`、`search_failed`、`weak_title`、`artist_unverified` 或 `ambiguous`，全屏和文本界面都会显示对应说明。`--manual` 禁止自动选择；`--manual-review` 保留推荐但要求每首歌显式确认。
 

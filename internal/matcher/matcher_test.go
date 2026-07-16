@@ -318,6 +318,63 @@ func TestProfileRankingStandardPrefersArtistAndClassicalPrefersTitle(t *testing.
 	}
 }
 
+func TestClassicalCatalogueReferenceBoost(t *testing.T) {
+	t.Parallel()
+	base := New(Options{})
+	song := model.Song{Name: "Symphony No. 5 BWV 1007", Artist: "Composer"}
+	video := model.Video{BVID: "shared", Title: "Cello Suite BWV 1007 recording", Uploader: "Performer"}
+	standard := resolvedMatcher(t, base, service.MatchProfileStandard, nil).Match(song, []model.Video{video}, 1)[0]
+	classical := resolvedMatcher(t, base, service.MatchProfileClassical, nil).Match(song, []model.Video{video}, 1)[0]
+	if standard.TitleScore == 100 {
+		t.Fatalf("standard title score was boosted: %#v", standard)
+	}
+	if classical.TitleScore != 100 || classical.KeywordScore != classical.TitleScore {
+		t.Fatalf("classical catalogue score = %#v", classical)
+	}
+
+	different := model.Video{BVID: "different", Title: "Cello Suite BWV 1008 recording"}
+	standardDifferent := resolvedMatcher(t, base, service.MatchProfileStandard, nil).Match(song, []model.Video{different}, 1)[0]
+	classicalDifferent := resolvedMatcher(t, base, service.MatchProfileClassical, nil).Match(song, []model.Video{different}, 1)[0]
+	if classicalDifferent.TitleScore != standardDifferent.TitleScore {
+		t.Fatalf("different reference changed similarity: standard=%v classical=%v", standardDifferent.TitleScore, classicalDifferent.TitleScore)
+	}
+}
+
+func TestClassicalCatalogueBoostUsesAnySharedReferenceAndCustomWeights(t *testing.T) {
+	t.Parallel()
+	weights := service.MatchWeights{Title: 7}
+	classical := resolvedMatcher(t, New(Options{}), service.MatchProfileClassical, &weights)
+	song := model.Song{Name: "Pair BWV 1007 and BWV 1008"}
+	videos := []model.Video{
+		{BVID: "intersection", Title: "Second work: bwv 1008"},
+		{BVID: "different", Title: "Other work: BWV 1009"},
+	}
+	results := classical.Match(song, videos, len(videos))
+	if results[0].Video.BVID != "intersection" || results[0].TitleScore != 100 || results[0].Score != 100 {
+		t.Fatalf("custom-weight intersection result = %#v", results[0])
+	}
+	if results[1].TitleScore == 100 {
+		t.Fatalf("different reference was boosted: %#v", results[1])
+	}
+	if weights != (service.MatchWeights{Title: 7}) {
+		t.Fatalf("custom weights were mutated: %#v", weights)
+	}
+}
+
+func TestClassicalCatalogueBoostPreservesAmbiguityDecision(t *testing.T) {
+	t.Parallel()
+	classical := resolvedMatcher(t, New(Options{}), service.MatchProfileClassical, nil)
+	song := model.Song{Name: "Suite BWV 1007"}
+	videos := []model.Video{
+		{BVID: "first", Title: "Recording BWV 1007"},
+		{BVID: "second", Title: "Performance BWV 1007"},
+	}
+	ranked := classical.Match(song, videos, len(videos))
+	if got := classical.Decide(song, ranked, true); got.ReviewReason != model.ReviewAmbiguous || got.SelectedIndex != -1 {
+		t.Fatalf("catalogue ambiguity decision = %#v for %#v", got, ranked)
+	}
+}
+
 func TestClassicalDecisionWaitsForFallbackAndReviewsCloseRecordings(t *testing.T) {
 	t.Parallel()
 	classical := resolvedMatcher(t, New(Options{}), service.MatchProfileClassical, nil)
