@@ -39,52 +39,80 @@ func ClassicalMatchWeights() MatchWeights {
 type BrowserPolicy string
 
 const (
-	BrowserAuto   BrowserPolicy = "auto"
-	BrowserNever  BrowserPolicy = "never"
+	// BrowserAuto uses a browser only when provider extraction is unavailable or incomplete.
+	BrowserAuto BrowserPolicy = "auto"
+	// BrowserNever disables browser provisioning and fallback.
+	BrowserNever BrowserPolicy = "never"
+	// BrowserAlways requires a browser to be available for fallback.
 	BrowserAlways BrowserPolicy = "always"
 )
 
+// Config controls engine state paths, network pacing, login, and browser defaults.
 type Config struct {
-	ConfigDir           string
-	CacheDir            string
-	HTTPTimeout         time.Duration
-	RatePerSecond       float64
+	// ConfigDir stores cookies, conversion checkpoints, and manual decisions.
+	ConfigDir string
+	// CacheDir stores replaceable search and browser caches.
+	CacheDir string
+	// HTTPTimeout is the default timeout for remote HTTP clients.
+	HTTPTimeout time.Duration
+	// RatePerSecond limits non-search remote operations.
+	RatePerSecond float64
+	// SearchRatePerSecond limits Bilibili search and identity setup requests.
 	SearchRatePerSecond float64
-	Login               LoginOptions
-	Browser             BrowserOptions
+	// Login supplies defaults used by Login.
+	Login LoginOptions
+	// Browser supplies defaults used by ParsePlaylist.
+	Browser BrowserOptions
 }
 
+// LoginOptions controls stored-cookie and QR login behavior.
 type LoginOptions struct {
 	UseStoredCookies bool
 	AllowQR          bool
 	Timeout          time.Duration
 }
 
+// BrowserOptions controls the default playlist browser-fallback policy.
 type BrowserOptions struct {
 	Policy BrowserPolicy
 }
 
+// ParseOptions controls one playlist parse operation.
 type ParseOptions struct {
 	BrowserPolicy BrowserPolicy
 }
 
+// MatchOptions controls adaptive, budgeted matching for a song batch.
 type MatchOptions struct {
-	SearchPages       int
-	TopK              int
-	Workers           int
-	Profile           MatchProfile
-	Weights           *MatchWeights
-	SearchIdentity    SearchIdentity
-	SearchBudget      int
+	// SearchPages is the maximum page count for each generated query.
+	SearchPages int
+	// TopK is the number of ranked candidates retained for review; it does not increase requests.
+	TopK int
+	// Workers is the maximum number of songs matched concurrently.
+	Workers int
+	// Profile selects standard or classical query, scoring, and decision policy.
+	Profile MatchProfile
+	// Weights optionally replaces the profile's relative scoring weights.
+	Weights *MatchWeights
+	// SearchIdentity selects isolated anonymous or logged-in search state.
+	SearchIdentity SearchIdentity
+	// SearchBudget caps remote requests per song; cache hits are free.
+	SearchBudget int
+	// SearchCachePolicy controls persistent search page reuse.
 	SearchCachePolicy SearchCachePolicy
 }
 
 // CandidateSearchOptions controls ranking for one manual candidate search.
 type CandidateSearchOptions struct {
-	Limit             int
-	Profile           MatchProfile
-	Weights           *MatchWeights
-	SearchIdentity    SearchIdentity
+	// Limit is the number of ranked candidates returned.
+	Limit int
+	// Profile selects the scoring policy.
+	Profile MatchProfile
+	// Weights optionally replaces the profile's relative scoring weights.
+	Weights *MatchWeights
+	// SearchIdentity selects isolated anonymous or logged-in search state.
+	SearchIdentity SearchIdentity
+	// SearchCachePolicy controls persistent search page reuse.
 	SearchCachePolicy SearchCachePolicy
 }
 
@@ -92,16 +120,20 @@ type CandidateSearchOptions struct {
 type SearchIdentity string
 
 const (
+	// SearchIdentityAnonymous uses only the persistent anonymous device jar.
 	SearchIdentityAnonymous SearchIdentity = "anonymous"
-	SearchIdentitySession   SearchIdentity = "session"
+	// SearchIdentitySession uses the authenticated account jar and MID cache partition.
+	SearchIdentitySession SearchIdentity = "session"
 )
 
 // SearchCachePolicy controls persistent search-cache reads and writes.
 type SearchCachePolicy string
 
 const (
+	// SearchCacheDefault reads fresh entries and writes successful remote results.
 	SearchCacheDefault SearchCachePolicy = ""
-	SearchCacheBypass  SearchCachePolicy = "bypass"
+	// SearchCacheBypass performs a remote request without reading or replacing an entry.
+	SearchCacheBypass SearchCachePolicy = "bypass"
 	// SearchCacheRefresh bypasses existing entries and replaces them with the
 	// successful remote response.
 	SearchCacheRefresh SearchCachePolicy = "refresh"

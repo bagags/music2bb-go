@@ -60,9 +60,12 @@ consumers outside this module.
 | `internal/netx` | Shared HTTP retry, concurrency, and rate-limit behavior |
 
 Bilibili video search uses the typed WBI endpoint with Unicode-safe signing and
-the stored first-party session context. HTTP/API rejection details remain typed
-errors, and a Gaia risk-control voucher is reported as a challenge rather than
-misrepresented as an empty search result.
+two isolated identities. Anonymous search starts from its own persistent device
+jar and can accept first-party device cookies, but it never imports account
+cookies. Session search uses the authenticated jar and is partitioned by MID.
+Each identity has separate WBI and fingerprint state. HTTP/API rejection details
+remain typed errors, and a Gaia risk-control voucher is reported as a challenge
+rather than misrepresented as an empty search result.
 
 ## Public and internal data
 
@@ -94,6 +97,35 @@ login, Chromium installation/retry, parsing, matching, manual search, favorite
 operations, and writes. Bubble Tea consumes serialized observer and result
 messages through a channel. Its operation context is cancelled when the UI
 closes, and the controller waits for active backend work before returning.
+
+## Search and recovery state
+
+Adaptive matching is page-width-first and profile-aware. The service rescores
+the aggregate after every page and stops at the profile decision threshold;
+retained candidate count does not control request count. Defaults are five
+candidates, two workers, two search requests per second with burst one, and a
+four-remote-request budget per song. Cache hits do not consume that budget.
+
+The Bilibili boundary caches unscored page snapshots under
+`CacheDir/search/v1/`, partitioned by an opaque anonymous fingerprint hash or
+session MID. This allows matcher and weight changes to rescore cached videos.
+Positive pages expire after seven days, empty pages after one hour, and errors
+are not cached. Corrupt search entries are quarantined because they are
+rebuildable.
+
+The CLI boundary owns `ConfigDir/conversions/v1/` checkpoints and
+`ConfigDir/decisions/v1/` cross-playlist decisions. Songs align by stable source
+ID rather than position. Checkpoint and decision corruption is fatal and the
+original file is preserved. Version 1 is additive: write-receipt fields are
+optional, and no Phase 1-3 state operation overwrites or migrates the existing
+account-cookie file.
+
+Favorite writes emit a receipt for every completed remote item. The CLI saves
+each receipt atomically inside the playlist checkpoint, keyed by target favorite
+ID, and filters already-successful BVIDs on retry. Failed receipts remain
+observable but are eligible for retry. The write gate requires every song to be
+selected or explicitly skipped and rejects all writes after a session
+risk-control halt; cached candidates remain available for offline review.
 
 `internal/service` defines interfaces at the point where they are consumed and
 continues to receive decoded `model.Song` values. `internal/playlist` sits behind
@@ -211,6 +243,9 @@ defaults.
 - `go test -race ./...` validates concurrent matching, observers, clients, and
   injected dependencies.
 - The `live` tag enables read-only network canaries.
+- The anonymous live-search canary additionally requires
+  `MUSIC2BB_RUN_ANON_SEARCH_CANARY=1` and verifies that sentinel account cookies
+  are absent from real anonymous requests.
 - The `browser_install` tag validates a pinned Chromium archive, launch, and
   controlled extraction.
 - The `authenticated` tag can create and remove temporary Bilibili resources;

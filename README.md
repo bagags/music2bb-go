@@ -17,9 +17,10 @@
 - 自动识别歌单来源，优先使用已注册的来源优化；HTTP 解析失败或不完整时自动通知并切换到受控 Chromium
 - 保留酷狗直连 API、页面 JSON、分页、签名和歌曲清理优化
 - 解析用户提供的 Apple Music 公开分享歌单页面及其中的公开元数据，无需 Apple 账号登录
-- Bilibili 扫码登录、Cookie 持久化、WBI 签名和收藏夹管理
+- 匿名优先的 Bilibili 搜索、隔离的设备 Cookie/账号 Cookie、WBI 签名和按需扫码登录
 - 标题、歌手、音质、官方来源、热度和 UP 主六项归一化权重综合评分
-- 默认 4 个受限并发 worker，保持输入与结果顺序
+- 默认 2 个 worker、2 requests/s、每曲 4 次远程请求预算，保持输入与结果顺序
+- 七天搜索缓存、歌单 checkpoint、跨歌单人工决定和幂等收藏夹写入恢复
 - 终端中自动启动覆盖登录、解析、匹配、审核、收藏夹、确认、写入和回执的全屏工作区
 - 平衡式分阶段匹配、可解释审核原因、完全手动匹配和候选覆盖
 - 可取消操作、稳定退出码、结构化部分失败结果
@@ -52,6 +53,8 @@ music2bb logout
 music2bb favorites list
 music2bb favorites create <name> [--intro TEXT] [--public]
 music2bb browser install|status|clear
+music2bb cache status
+music2bb cache clear --search|--checkpoints|--decisions|--anonymous-identity|--all
 music2bb version
 music2bb license
 ```
@@ -91,9 +94,11 @@ music2bb convert '<playlist-url>' --top-k 5 --manual-review
 
 | 选项 | 默认值 | 说明 |
 |---|---:|---|
-| `--search-pages` | `3` | 每首歌搜索的页数 |
-| `--top-k` | `3` | 为审核保留的有序候选数 |
-| `--workers` | `4` | 并发匹配数量 |
+| `--search-pages` | `3` | 每个自适应查询最多搜索页数 |
+| `--top-k` | `5` | 为审核保留的有序候选数，不增加请求次数 |
+| `--workers` | `2` | 并发匹配数量 |
+| `--search-identity` | `auto` | `auto` 匿名优先，或强制 `anonymous`/`session` |
+| `--search-budget` | `4` | 每首歌每次运行最多远程搜索请求数 |
 | `--match-profile` | `standard` | `standard`（歌手导向）或 `classical`（作品标题导向） |
 | `--favorite` | — | 收藏夹 ID 或完整名称 |
 | `--yes` | `false` | 跳过最终写入确认 |
@@ -102,11 +107,33 @@ music2bb convert '<playlist-url>' --top-k 5 --manual-review
 | `--manual` | `false` | 完全手动选择 |
 | `--no-tui` | `false` | 强制使用无 ANSI、按歌单顺序输出的引导式文本界面 |
 | `--no-qr-login` | `false` | 禁止自动发起扫码登录 |
+| `--fresh` | `false` | 忽略 checkpoint 和人工决定，仍可使用搜索缓存 |
+| `--refresh-search` | `false` | 替换搜索缓存并重置匿名设备状态，不清除账号 Cookie |
 | `--config-dir` | 系统目录 | 指定便携配置目录 |
 | `--verbose`, `-v` | `false` | 输出详细进度 |
 
 管道、CI、屏幕阅读器环境、`TERM=dumb` 或显式 `--no-tui` 会使用相同转换控制器下的文本界面。非交互式写入需要同时指定 `--favorite` 和 `--yes`；如果仍有无法自动解决的歌曲，则必须改在交互终端中逐首选择或跳过。
 新建 Bilibili 收藏夹默认仅自己可见；如需公开收藏夹，请在 `favorites create` 命令中指定 `--public`。
+
+默认搜索先使用独立的匿名设备状态。匿名 Jar 可以接受 Bilibili 下发的 `buvid` 等设备 Cookie，但永远不会从账号 Jar 复制 `SESSDATA`、`bili_jct` 或其他登录状态。这里的“匿名”表示账号状态隔离，不表示网络匿名：IP、设备 Cookie 和平台设备指纹仍可能影响搜索结果或触发 Bilibili 风控。程序不会自动轮换匿名指纹，也不会用轮换或冷却机制规避平台风控。
+
+明确风控时，`auto` 模式只显示一次身份切换汇总并使用已存登录态或扫码继续未完成歌曲；普通超时、网络失败和空结果不会触发登录。登录态再次风控后仍可离线选择或跳过已经取得的候选，但本次运行禁止创建或写入收藏夹。只有所有歌曲都已选择或显式跳过且没有风控 halt 时，写入阶段才会开放。`--verbose` 会额外显示缓存命中、匿名/登录远程请求、完成歌曲、预算消耗和停止原因。
+
+## 持久状态与缓存管理
+
+搜索页面缓存在系统缓存目录的 `search/v1/`；正常结果有效七天，空结果有效一小时，错误不缓存。转换 checkpoint 位于配置目录的 `conversions/v1/`，跨歌单人工选择/跳过位于 `decisions/v1/` 且七天后硬过期。匿名设备状态单独保存在 `cookies/bilibili-anonymous.json`，账号 Cookie 仍只保存在 `cookies/bilibili.json`。
+
+每个成功搜索页、完成歌曲、人工决定和收藏夹逐项回执都会原子保存。恢复时按稳定来源歌曲 ID 对齐，因此歌单重排、增删不会使已有进度错位；同一 checkpoint 对同一目标收藏夹已成功写入的 BVID 不会重复提交。普通搜索缓存损坏时会隔离重建，checkpoint 或人工决定损坏则保留原文件并报错。
+
+```bash
+music2bb cache status
+music2bb cache clear --search
+music2bb cache clear --checkpoints --decisions
+music2bb cache clear --anonymous-identity
+music2bb cache clear --all
+```
+
+`cache clear` 只处理显式选择的附加状态；即使使用 `--all` 也不会清除或迁移账号 Cookie。`--refresh-search` 等价于为本次搜索绕过并替换搜索缓存，同时显式重置匿名设备状态；`--fresh` 只忽略转换 checkpoint 和历史人工决定，两者可以组合。
 
 ## 匹配配置与审核原因
 
@@ -155,6 +182,8 @@ music2bb browser clear
 
 程序内置默认列表。配置目录中的同名文件会覆盖内置值。首次运行会识别工作目录或可执行文件目录中的旧 `.cookies/bilibili.json`、`b.txt`、`w.txt` 和 `w-up.txt`，以原子写入方式复制到新目录；不会修改或删除旧文件。Cookie 文件使用仅所有者可读写权限。
 
+新增状态使用附加式版本化 schema，不覆盖或迁移现有账号 Cookie：搜索页位于缓存目录的 `search/v1/`，转换 checkpoint 位于配置目录的 `conversions/v1/`，人工决定位于 `decisions/v1/`，匿名设备 Cookie 单独位于 `cookies/bilibili-anonymous.json`。损坏的搜索缓存会隔离后重建；损坏的 checkpoint 或人工决定会报错并保留原文件。
+
 ## Go 后端
 
 CLI 只通过公共包调用后端：
@@ -177,7 +206,7 @@ matches, err := engine.Match(ctx, songs, music2bb.MatchOptions{
 }, observer)
 ```
 
-模块根包 `music2bb` 暴露上下文感知的登录、解析、匹配、搜索、收藏夹和浏览器操作，以及序列化观察者、类型化错误、审核原因和测试依赖注入。`StandardMatchWeights`、`ClassicalMatchWeights` 返回内置预设；`SearchCandidatesWithOptions` 让手动搜索沿用同一配置。自定义权重接受任意非负有限相对值，但至少一项必须为正；无效配置会在远端请求前返回 `ErrorInvalidInput`。非公开站点协议保留在 `internal` 包中。项目的包职责和依赖方向见 [`docs/architecture.md`](docs/architecture.md)。
+模块根包 `music2bb` 暴露上下文感知的登录、解析、匹配、搜索、收藏夹和浏览器操作，以及序列化观察者、类型化错误、审核原因、搜索身份/状态、可注入 `SearchCache` 和测试依赖注入。`StandardMatchWeights`、`ClassicalMatchWeights` 返回内置预设；`SearchCandidatesWithOptions` 让手动搜索沿用同一配置。`EventSong.Outcome` 包含完整匹配状态，`EventVideo.WriteReceipt` 可用于逐项持久化收藏夹写入。自定义权重接受任意非负有限相对值，但至少一项必须为正；无效配置会在远端请求前返回 `ErrorInvalidInput`。非公开站点协议保留在 `internal` 包中。项目的包职责和依赖方向见 [`docs/architecture.md`](docs/architecture.md)。
 
 ## 测试
 
@@ -198,6 +227,15 @@ MUSIC2BB_TEST_BVID='BV1xx411c7mD' \
 MUSIC2BB_TEST_SEARCH_QUERY='贝多芬 第五交响曲' \
 MUSIC2BB_TEST_COOKIE_FILE='/path/to/bilibili.json' \
 go test -count=1 -tags=live ./internal/kugou ./internal/applemusic ./internal/bilibili
+```
+
+可选匿名真实搜索 canary 会先在账号 Jar 中放入哨兵登录 Cookie，再验证所有真实匿名搜索请求都不携带这些 Cookie：
+
+```bash
+MUSIC2BB_RUN_ANON_SEARCH_CANARY=1 \
+MUSIC2BB_TEST_SEARCH_QUERY='贝多芬 第五交响曲' \
+go test -count=1 -tags=live ./internal/bilibili \
+  -run TestLiveAnonymousSearchExcludesAccountCookies -v
 ```
 
 使用已下载的固定 Chromium 归档运行安装、启动和动态页面提取：

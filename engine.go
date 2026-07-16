@@ -99,7 +99,8 @@ func (e *Engine) Close() error {
 func (e *Engine) Browser() *BrowserManager { return e.browser }
 
 // PersistentStatePaths returns the resolved config and cache roots used by
-// this engine. Frontends use these roots for versioned conversion state.
+// this engine. Frontends use these roots for versioned additive state. The
+// method does not create, migrate, or clear any files.
 func (e *Engine) PersistentStatePaths() (configDir, cacheDir string) {
 	if e == nil || e.components == nil {
 		return "", ""
@@ -127,7 +128,8 @@ func (e *Engine) Logout(ctx context.Context) error {
 }
 
 // ResetAnonymousIdentity clears the anonymous device cookie jar without
-// changing account cookies.
+// changing account cookies. It should be an explicit user action; the engine
+// never rotates anonymous identity automatically.
 func (e *Engine) ResetAnonymousIdentity(ctx context.Context) error {
 	return wrapError(e.service.ResetAnonymousIdentity(ctx))
 }
