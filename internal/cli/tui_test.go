@@ -100,6 +100,25 @@ func TestTUIReviewKeyBindingsAndOverride(t *testing.T) {
 	}
 }
 
+func TestTUIInitialSearchArrowKeysMoveSongCursor(t *testing.T) {
+	model, cleanup := testTUIModel(t)
+	defer cleanup()
+	model = updateTUI(t, model, tuiSongsMsg{songs: sampleSongs()})
+	model = updateTUI(t, model, tuiPhaseMsg{phase: phaseMatch, text: "match"})
+
+	model = pressTUI(t, model, "down")
+	if model.songCursor != 1 {
+		t.Fatalf("down during initial search did not move song: %d", model.songCursor)
+	}
+	model = pressTUI(t, model, "up")
+	if model.songCursor != 0 {
+		t.Fatalf("up during initial search did not move song: %d", model.songCursor)
+	}
+	if footer := model.renderFooter(); !strings.Contains(footer, "↑/↓ 歌曲") {
+		t.Fatalf("initial-search footer does not advertise song navigation: %q", footer)
+	}
+}
+
 func TestTUIManualSearchAndPrivateFavoriteCreation(t *testing.T) {
 	model, cleanup := testTUIModel(t)
 	defer cleanup()

@@ -565,6 +565,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.validation = ""
 			return m, m.controller.startCmd()
 		}
+	case phaseMatch:
+		switch keystroke {
+		case "up", "k":
+			m.moveSong(-1)
+		case "down", "j":
+			m.moveSong(1)
+		}
 	case phaseReview:
 		return m.updateReview(keystroke)
 	case phaseFavorite:
@@ -1386,6 +1393,8 @@ func fixedSize(content string, width, height int) string {
 
 func (m tuiModel) renderFooter() string {
 	switch m.phase {
+	case phaseMatch:
+		return " ↑/↓ 歌曲  ? 帮助  q 取消"
 	case phaseReview:
 		return " ←/→ 歌曲  ↑/↓ 候选  Enter 接受  Tab 下一待审  s 搜索  x 跳过  u 清除  c 继续  ? 帮助  q 取消"
 	case phaseFavorite:
