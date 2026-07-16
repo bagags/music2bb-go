@@ -66,6 +66,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.runFavorites(ctx, commandArgs)
 	case "browser":
 		return a.runBrowser(ctx, commandArgs)
+	case "cache":
+		return a.runCache(ctx, commandArgs)
 	case "version":
 		fmt.Fprintln(a.IO.Out, a.Version)
 		return ExitSuccess
@@ -107,6 +109,8 @@ func (a *App) printHelp() {
   music2bb favorites list
   music2bb favorites create <name> [--intro TEXT] [--public]
   music2bb browser install|status|clear
+  music2bb cache status
+  music2bb cache clear --search|--checkpoints|--decisions|--anonymous-identity|--all
   music2bb version
   music2bb license`)
 }

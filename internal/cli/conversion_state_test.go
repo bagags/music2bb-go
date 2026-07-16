@@ -147,3 +147,56 @@ func TestCorruptCheckpointAndDecisionAreReportedAndPreserved(t *testing.T) {
 		t.Fatalf("decision was changed: %q", got)
 	}
 }
+
+func TestWriteReceiptsAreAdditiveAndPartitionedByFavorite(t *testing.T) {
+	root := t.TempDir()
+	state := newConversionState(root, "https://music.example/list", func() time.Time { return time.Unix(1234, 0) })
+	if err := state.saveWriteReceipt(music2bb.WriteReceipt{FavoriteID: 9, BVID: "BV-retry", Reason: "temporary"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.saveWriteSuccess(9, "BV-one"); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.saveWriteSuccess(10, "BV-two"); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded := newConversionState(root, "https://music.example/list", time.Now)
+	for favoriteID, want := range map[int64]string{9: "BV-one", 10: "BV-two"} {
+		got, err := reloaded.successfulWrites(favoriteID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := got[want]; !ok || len(got) != 1 {
+			t.Fatalf("favorite %d receipts = %#v", favoriteID, got)
+		}
+	}
+	if err := reloaded.loadCheckpointLocked(); err != nil {
+		t.Fatal(err)
+	}
+	failed := reloaded.document.Writes["9"].Failed["BV-retry"]
+	if failed.Reason != "temporary" || failed.UpdatedAt.IsZero() {
+		t.Fatalf("failed receipt = %#v", failed)
+	}
+	if err := reloaded.saveWriteSuccess(9, "BV-retry"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reloaded.document.Writes["9"].Failed["BV-retry"]; ok {
+		t.Fatal("successful retry did not replace the failed receipt")
+	}
+}
+
+func TestLegacyV1CheckpointWithoutWritesRemainsReadable(t *testing.T) {
+	root := t.TempDir()
+	state := newConversionState(root, "https://music.example/list", time.Now)
+	legacy := `{"version":1,"playlistID":"` + state.playlistID + `","sourceURL":"https://music.example/list","updatedAt":"2026-07-16T00:00:00Z","songs":{}}`
+	if err := os.MkdirAll(filepath.Dir(state.checkpointPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(state.checkpointPath, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if receipts, err := state.successfulWrites(9); err != nil || len(receipts) != 0 {
+		t.Fatalf("legacy receipts = %#v, %v", receipts, err)
+	}
+}

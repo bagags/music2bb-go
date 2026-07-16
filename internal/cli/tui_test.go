@@ -254,7 +254,7 @@ func TestTUIParseFailureManualEntryAndPartialWriteReceipt(t *testing.T) {
 	model.phase = phaseWrite
 	partial := music2bb.AddResult{FavoriteID: 9, Succeeded: []string{"BV-auto"}, Failed: []music2bb.AddFailure{{BVID: "BV2", Reason: "denied"}}}
 	model = updateTUI(t, model, tuiWriteMsg{result: partial, err: &music2bb.Error{Category: music2bb.ErrorPartialWrite, Operation: "write", Message: "partial"}})
-	if model.exitCode != ExitPartialWrite || !strings.Contains(model.receipt, "成功: 1 | 失败: 1 | 跳过: 1") {
+	if model.exitCode != ExitPartialWrite || !strings.Contains(model.receipt, "成功: 1 | 失败: 1 | 已存在: 0 | 歌曲跳过: 1") {
 		t.Fatalf("partial receipt = %q exit=%d", model.receipt, model.exitCode)
 	}
 }
@@ -528,7 +528,11 @@ func TestTUIControllerCancellationWaitsForWrite(t *testing.T) {
 	backend := &cancellationBackend{fakeBackend: &fakeBackend{}, started: make(chan struct{}), done: make(chan struct{})}
 	session := newConversionSession(backend, nil, "https://example.test", convertOptions{}, music2bb.BrowserAuto)
 	controller := newTUIController(context.Background(), session)
-	cmd := controller.writeCmd(9, sampleOutcomes())
+	outcomes := sampleOutcomes()
+	outcomes[1].NeedsReview = false // explicitly skipped before entering write
+	outcomes[1].ReviewReason = music2bb.ReviewNone
+	outcomes[1].SearchStatus = music2bb.SearchStatusCompleted
+	cmd := controller.writeCmd(9, outcomes)
 	go cmd()
 	select {
 	case <-backend.started:

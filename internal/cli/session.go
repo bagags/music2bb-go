@@ -29,6 +29,15 @@ type conversionSession struct {
 	state        *conversionState
 	refreshOnce  sync.Once
 	refreshErr   error
+	telemetryMu  sync.Mutex
+	telemetry    conversionTelemetry
+}
+
+type conversionTelemetry struct {
+	anonymousRequests int
+	sessionRequests   int
+	cacheHits         int
+	budgetCapacity    int
 }
 
 func newConversionSession(backend Backend, browser BrowserManager, rawURL string, options convertOptions, policy music2bb.BrowserPolicy) *conversionSession {
@@ -93,6 +102,9 @@ func (s *conversionSession) parse(ctx context.Context, observer music2bb.Observe
 }
 
 func (s *conversionSession) match(ctx context.Context, songs []music2bb.Song, observer music2bb.Observer) ([]music2bb.MatchResult, error) {
+	s.telemetryMu.Lock()
+	s.telemetry = conversionTelemetry{}
+	s.telemetryMu.Unlock()
 	if err := s.prepareSearchState(ctx); err != nil {
 		return nil, err
 	}
@@ -126,7 +138,11 @@ func (s *conversionSession) match(ctx context.Context, songs []music2bb.Song, ob
 		pendingSongs = append(pendingSongs, song)
 		pendingIndexes = append(pendingIndexes, index)
 	}
+	s.telemetryMu.Lock()
+	s.telemetry.budgetCapacity = len(pendingSongs) * normalizedSearchBudget(s.options.searchBudget)
+	s.telemetryMu.Unlock()
 	if len(pendingSongs) == 0 {
+		s.emitVerboseSearchSummary(observer, outcomes)
 		return outcomes, nil
 	}
 	var persistenceMu sync.Mutex
@@ -160,6 +176,7 @@ func (s *conversionSession) match(ctx context.Context, songs []music2bb.Song, ob
 	}
 	persistenceMu.Lock()
 	defer persistenceMu.Unlock()
+	s.emitVerboseSearchSummary(observer, outcomes)
 	return outcomes, joinSessionErrors(matchErr, persistenceErr)
 }
 
@@ -188,6 +205,7 @@ func (s *conversionSession) matchUnrestored(ctx context.Context, songs []music2b
 		SearchCachePolicy: s.searchCachePolicy(),
 	}
 	outcomes, err := s.backend.Match(ctx, songs, baseOptions, observer)
+	s.addRemoteRequests(identity, outcomes)
 	if riskReasonOf(err) == "" || identity == music2bb.SearchIdentitySession || s.options.searchIdentity != "auto" {
 		if riskReasonOf(err) != "" {
 			s.blockWrites(riskReasonOf(err))
@@ -198,6 +216,13 @@ func (s *conversionSession) matchUnrestored(ctx context.Context, songs []music2b
 		s.blockWrites(riskReasonOf(err))
 		return outcomes, loginErr
 	}
+	pending := 0
+	for _, outcome := range outcomes {
+		if outcome.SearchStatus == music2bb.SearchStatusNotSearched || outcome.SearchStatus == music2bb.SearchStatusRiskControl {
+			pending++
+		}
+	}
+	emitSessionWarning(observer, "search_identity", fmt.Sprintf("匿名搜索触发风控；已切换登录态继续 %d 首未完成歌曲。", pending))
 	var firstErr error
 	for index := range outcomes {
 		if outcomes[index].SearchStatus != music2bb.SearchStatusNotSearched && outcomes[index].SearchStatus != music2bb.SearchStatusRiskControl {
@@ -215,6 +240,7 @@ func (s *conversionSession) matchUnrestored(ctx context.Context, songs []music2b
 		fallbackOptions.SearchIdentity = music2bb.SearchIdentitySession
 		fallbackOptions.SearchBudget = remaining
 		fallback, fallbackErr := s.backend.Match(ctx, []music2bb.Song{songs[index]}, fallbackOptions, observer)
+		s.addRemoteRequests(music2bb.SearchIdentitySession, fallback)
 		if len(fallback) == 1 {
 			fallback[0].RemoteRequests += outcomes[index].RemoteRequests
 			fallback[0].CacheHits += outcomes[index].CacheHits
@@ -330,14 +356,14 @@ func (s *conversionSession) videoDetail(ctx context.Context, bvid string) (music
 }
 
 func (s *conversionSession) favorites(ctx context.Context) ([]music2bb.Favorite, error) {
-	if _, err := s.prepareWrite(ctx, nil); err != nil {
-		return nil, err
-	}
 	return s.backend.ListFavorites(ctx)
 }
 
-func (s *conversionSession) prepareWrite(ctx context.Context, observer music2bb.Observer) (music2bb.Account, error) {
+func (s *conversionSession) prepareWrite(ctx context.Context, observer music2bb.Observer, outcomes []music2bb.MatchResult) (music2bb.Account, error) {
 	if err := s.ensureWritesAllowed(); err != nil {
+		return music2bb.Account{}, err
+	}
+	if err := ensureOutcomesResolved(outcomes); err != nil {
 		return music2bb.Account{}, err
 	}
 	return s.login(ctx, observer)
@@ -354,7 +380,151 @@ func (s *conversionSession) write(ctx context.Context, favoriteID int64, outcome
 	if err := s.ensureWritesAllowed(); err != nil {
 		return music2bb.AddResult{}, err
 	}
-	return s.backend.AddToFavorite(ctx, favoriteID, outcomes, observer)
+	if err := ensureOutcomesResolved(outcomes); err != nil {
+		return music2bb.AddResult{}, err
+	}
+	already, err := s.state.successfulWrites(favoriteID)
+	if err != nil {
+		return music2bb.AddResult{}, persistentStateError("load write receipts", err)
+	}
+	result := music2bb.AddResult{FavoriteID: favoriteID}
+	pending := make([]music2bb.MatchResult, 0, len(outcomes))
+	seen := make(map[string]struct{}, len(outcomes))
+	for _, outcome := range outcomes {
+		if !outcome.HasSelection || outcome.Video == nil || strings.TrimSpace(outcome.Video.BVID) == "" {
+			continue
+		}
+		bvid := outcome.Video.BVID
+		if _, duplicate := seen[bvid]; duplicate {
+			continue
+		}
+		seen[bvid] = struct{}{}
+		if _, done := already[bvid]; done {
+			result.Skipped = append(result.Skipped, bvid)
+			continue
+		}
+		pending = append(pending, outcome)
+	}
+	if len(pending) == 0 {
+		return result, nil
+	}
+	var persistenceMu sync.Mutex
+	var persistenceErr error
+	receiptSeen := make(map[string]struct{})
+	tracking := music2bb.ObserverFunc(func(event music2bb.ProgressEvent) {
+		if event.Kind == music2bb.EventVideo && event.Operation == "add_favorite" && event.Message != "" {
+			item := event.WriteReceipt
+			if item == nil {
+				item = &music2bb.WriteReceipt{FavoriteID: favoriteID, BVID: event.Message, Succeeded: true}
+			}
+			persistenceMu.Lock()
+			receiptSeen[writeReceiptKey(item.BVID, item.Succeeded)] = struct{}{}
+			persistenceMu.Unlock()
+			if saveErr := s.state.saveWriteReceipt(*item); saveErr != nil {
+				persistenceMu.Lock()
+				if persistenceErr == nil {
+					persistenceErr = persistentStateError("save write receipt", saveErr)
+				}
+				persistenceMu.Unlock()
+			}
+		}
+		if observer != nil {
+			observer.Observe(event)
+		}
+	})
+	written, writeErr := s.backend.AddToFavorite(ctx, favoriteID, pending, tracking)
+	result.Succeeded = append(result.Succeeded, written.Succeeded...)
+	result.Failed = append(result.Failed, written.Failed...)
+	for _, bvid := range written.Succeeded {
+		if _, ok := receiptSeen[writeReceiptKey(bvid, true)]; ok {
+			continue
+		}
+		if saveErr := s.state.saveWriteReceipt(music2bb.WriteReceipt{FavoriteID: favoriteID, BVID: bvid, Succeeded: true}); saveErr != nil {
+			persistenceMu.Lock()
+			if persistenceErr == nil {
+				persistenceErr = persistentStateError("save write receipt", saveErr)
+			}
+			persistenceMu.Unlock()
+		}
+	}
+	for _, failure := range written.Failed {
+		if _, ok := receiptSeen[writeReceiptKey(failure.BVID, false)]; ok {
+			continue
+		}
+		if saveErr := s.state.saveWriteReceipt(music2bb.WriteReceipt{FavoriteID: favoriteID, BVID: failure.BVID, Reason: failure.Reason}); saveErr != nil {
+			persistenceMu.Lock()
+			if persistenceErr == nil {
+				persistenceErr = persistentStateError("save write receipt", saveErr)
+			}
+			persistenceMu.Unlock()
+		}
+	}
+	persistenceMu.Lock()
+	defer persistenceMu.Unlock()
+	return result, joinSessionErrors(writeErr, persistenceErr)
+}
+
+func writeReceiptKey(bvid string, succeeded bool) string {
+	return fmt.Sprintf("%t\x00%s", succeeded, bvid)
+}
+
+func ensureOutcomesResolved(outcomes []music2bb.MatchResult) error {
+	for _, outcome := range outcomes {
+		selected := outcome.HasSelection && outcome.Video != nil
+		skipped := !outcome.HasSelection && outcome.Video == nil && !outcome.NeedsReview &&
+			outcome.SearchStatus == music2bb.SearchStatusCompleted && outcome.ReviewReason == music2bb.ReviewNone
+		if !selected && !skipped {
+			return &music2bb.Error{Category: music2bb.ErrorInvalidInput, Operation: "write", Message: "所有歌曲必须先选择或跳过"}
+		}
+	}
+	return nil
+}
+
+func (s *conversionSession) addRemoteRequests(identity music2bb.SearchIdentity, outcomes []music2bb.MatchResult) {
+	total, cacheHits := 0, 0
+	for _, outcome := range outcomes {
+		total += outcome.RemoteRequests
+		cacheHits += outcome.CacheHits
+	}
+	s.telemetryMu.Lock()
+	s.telemetry.cacheHits += cacheHits
+	if identity == music2bb.SearchIdentitySession {
+		s.telemetry.sessionRequests += total
+	} else {
+		s.telemetry.anonymousRequests += total
+	}
+	s.telemetryMu.Unlock()
+}
+
+func (s *conversionSession) emitVerboseSearchSummary(observer music2bb.Observer, outcomes []music2bb.MatchResult) {
+	if !s.options.verbose || observer == nil {
+		return
+	}
+	completed := 0
+	for _, outcome := range outcomes {
+		if outcome.SearchStatus == music2bb.SearchStatusCompleted {
+			completed++
+		}
+	}
+	s.telemetryMu.Lock()
+	telemetry := s.telemetry
+	s.telemetryMu.Unlock()
+	requests := telemetry.anonymousRequests + telemetry.sessionRequests
+	message := fmt.Sprintf("搜索汇总: 缓存命中 %d，匿名远程请求 %d，登录远程请求 %d，完成歌曲 %d/%d，预算消耗 %d/%d",
+		telemetry.cacheHits, telemetry.anonymousRequests, telemetry.sessionRequests, completed, len(outcomes), requests, telemetry.budgetCapacity)
+	s.loginMu.Lock()
+	if s.writeBlocked {
+		message += fmt.Sprintf("，停止原因 %s", s.haltReason)
+	}
+	s.loginMu.Unlock()
+	observer.Observe(music2bb.ProgressEvent{Kind: music2bb.EventProgress, Operation: "search_summary", Message: message})
+}
+
+func normalizedSearchBudget(value int) int {
+	if value < 1 {
+		return 4
+	}
+	return value
 }
 
 func riskReasonOf(err error) music2bb.RiskControlReason {

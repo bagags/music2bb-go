@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -23,7 +25,9 @@ type fakeBackend struct {
 	matchFunc   func([]music2bb.Song, music2bb.MatchOptions) ([]music2bb.MatchResult, error)
 	matchCalls  int
 	addedTo     int64
+	addedBVIDs  [][]string
 	addCalls    int
+	addFunc     func(context.Context, int64, []music2bb.MatchResult, music2bb.Observer) (music2bb.AddResult, error)
 	loginErr    error
 	loginCalls  int
 	logoutErr   error
@@ -43,7 +47,11 @@ func (f *persistentFakeBackend) PersistentStatePaths() (string, string) {
 
 func (f *persistentFakeBackend) ResetAnonymousIdentity(context.Context) error {
 	f.resets++
-	return nil
+	err := os.Remove(filepath.Join(f.configDir, "cookies", "bilibili-anonymous.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 func (f *fakeBackend) LoginWithOptions(_ context.Context, opts music2bb.LoginOptions, _ music2bb.Observer) (music2bb.Account, error) {
@@ -101,10 +109,26 @@ func (f *fakeBackend) CreateFavorite(_ context.Context, request music2bb.CreateF
 	return music2bb.Favorite{ID: 10, Title: request.Title}, nil
 }
 
-func (f *fakeBackend) AddToFavorite(_ context.Context, favoriteID int64, _ []music2bb.MatchResult, _ music2bb.Observer) (music2bb.AddResult, error) {
+func (f *fakeBackend) AddToFavorite(ctx context.Context, favoriteID int64, outcomes []music2bb.MatchResult, observer music2bb.Observer) (music2bb.AddResult, error) {
 	f.addCalls++
 	f.addedTo = favoriteID
-	return music2bb.AddResult{FavoriteID: favoriteID, Succeeded: []string{"BV1"}}, nil
+	bvids := make([]string, 0, len(outcomes))
+	for _, outcome := range outcomes {
+		if outcome.HasSelection && outcome.Video != nil {
+			bvids = append(bvids, outcome.Video.BVID)
+		}
+	}
+	f.addedBVIDs = append(f.addedBVIDs, bvids)
+	if f.addFunc != nil {
+		return f.addFunc(ctx, favoriteID, outcomes, observer)
+	}
+	result := music2bb.AddResult{FavoriteID: favoriteID, Succeeded: append([]string(nil), bvids...)}
+	for index, bvid := range result.Succeeded {
+		if observer != nil {
+			observer.Observe(music2bb.ProgressEvent{Kind: music2bb.EventVideo, Operation: "add_favorite", Message: bvid, Current: index + 1, Total: len(bvids)})
+		}
+	}
+	return result, nil
 }
 
 type fakeBrowser struct{ status music2bb.BrowserStatus }
@@ -349,6 +373,178 @@ func TestSessionBlocksWritesAfterSessionRiskControl(t *testing.T) {
 	}
 	if backend.addCalls != 0 {
 		t.Fatalf("favorite write calls = %d, want zero", backend.addCalls)
+	}
+}
+
+func TestSessionWriteReceiptsSkipSucceededBVIDsOnRetry(t *testing.T) {
+	root := t.TempDir()
+	base := &fakeBackend{}
+	firstCall := true
+	base.addFunc = func(_ context.Context, favoriteID int64, outcomes []music2bb.MatchResult, observer music2bb.Observer) (music2bb.AddResult, error) {
+		result := music2bb.AddResult{FavoriteID: favoriteID}
+		for _, outcome := range outcomes {
+			if outcome.Video.BVID == "BV-one" && firstCall {
+				result.Succeeded = append(result.Succeeded, outcome.Video.BVID)
+				observer.Observe(music2bb.ProgressEvent{Kind: music2bb.EventVideo, Operation: "add_favorite", Message: outcome.Video.BVID})
+			} else if firstCall {
+				result.Failed = append(result.Failed, music2bb.AddFailure{BVID: outcome.Video.BVID, Reason: "temporary"})
+			} else {
+				result.Succeeded = append(result.Succeeded, outcome.Video.BVID)
+				observer.Observe(music2bb.ProgressEvent{Kind: music2bb.EventVideo, Operation: "add_favorite", Message: outcome.Video.BVID})
+			}
+		}
+		if firstCall {
+			firstCall = false
+			return result, &music2bb.Error{Category: music2bb.ErrorPartialWrite, Operation: "write", Message: "partial"}
+		}
+		return result, nil
+	}
+	backend := &persistentFakeBackend{fakeBackend: base, configDir: root, cacheDir: filepath.Join(root, "cache")}
+	session := newConversionSession(backend, nil, "https://example.test/list", convertOptions{}, music2bb.BrowserAuto)
+	one := music2bb.Video{BVID: "BV-one"}
+	two := music2bb.Video{BVID: "BV-two"}
+	outcomes := []music2bb.MatchResult{
+		{Song: music2bb.Song{Name: "one"}, Video: &one, HasSelection: true},
+		{Song: music2bb.Song{Name: "two"}, Video: &two, HasSelection: true},
+	}
+	if result, err := session.write(context.Background(), 9, outcomes, nil); err == nil || len(result.Succeeded) != 1 {
+		t.Fatalf("first write = %#v, %v", result, err)
+	}
+	result, err := session.write(context.Background(), 9, outcomes, nil)
+	if err != nil || !reflect.DeepEqual(result.Succeeded, []string{"BV-two"}) || !reflect.DeepEqual(result.Skipped, []string{"BV-one"}) {
+		t.Fatalf("retry write = %#v, %v", result, err)
+	}
+	if got := base.addedBVIDs; len(got) != 2 || !reflect.DeepEqual(got[0], []string{"BV-one", "BV-two"}) || !reflect.DeepEqual(got[1], []string{"BV-two"}) {
+		t.Fatalf("submitted BVIDs = %#v", got)
+	}
+
+	firstCall = false
+	if _, err := session.write(context.Background(), 10, outcomes, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := base.addedBVIDs[len(base.addedBVIDs)-1]; !reflect.DeepEqual(got, []string{"BV-one", "BV-two"}) {
+		t.Fatalf("different favorite submitted BVIDs = %#v", got)
+	}
+}
+
+func TestSessionRejectsWriteUntilEverySongIsResolved(t *testing.T) {
+	backend := &fakeBackend{}
+	session := newConversionSession(backend, nil, "url", convertOptions{}, music2bb.BrowserAuto)
+	video := music2bb.Video{BVID: "BV-one"}
+	outcomes := []music2bb.MatchResult{
+		{Video: &video, HasSelection: true},
+		{NeedsReview: true, ReviewReason: music2bb.ReviewNotSearched},
+	}
+	if _, err := session.prepareWrite(context.Background(), nil, outcomes); err == nil {
+		t.Fatal("prepareWrite accepted an unresolved song")
+	}
+	if _, err := session.write(context.Background(), 9, outcomes, nil); err == nil {
+		t.Fatal("write accepted an unresolved song")
+	}
+	if backend.loginCalls != 0 || backend.addCalls != 0 {
+		t.Fatalf("calls = login %d add %d", backend.loginCalls, backend.addCalls)
+	}
+}
+
+func TestVerboseSearchSummaryAndIdentitySwitchWarning(t *testing.T) {
+	root := t.TempDir()
+	base := &fakeBackend{}
+	base.matchFunc = func(songs []music2bb.Song, options music2bb.MatchOptions) ([]music2bb.MatchResult, error) {
+		if options.SearchIdentity == music2bb.SearchIdentityAnonymous {
+			return []music2bb.MatchResult{{
+				Song: songs[0], NeedsReview: true, ReviewReason: music2bb.ReviewRiskControl,
+				SearchStatus: music2bb.SearchStatusRiskControl, SearchIdentity: music2bb.SearchIdentityAnonymous,
+				RemoteRequests: 1, CacheHits: 2, RiskReason: music2bb.RiskControlVoucher,
+			}}, &music2bb.BatchError{Category: music2bb.ErrorNetwork, HaltReason: music2bb.RiskControlVoucher, SearchIdentity: music2bb.SearchIdentityAnonymous}
+		}
+		video := music2bb.Video{BVID: "BV-one"}
+		return []music2bb.MatchResult{{
+			Song: songs[0], Video: &video, HasSelection: true, SearchStatus: music2bb.SearchStatusCompleted,
+			SearchIdentity: music2bb.SearchIdentitySession, RemoteRequests: 2, CacheHits: 1,
+		}}, nil
+	}
+	backend := &persistentFakeBackend{fakeBackend: base, configDir: root, cacheDir: filepath.Join(root, "cache")}
+	session := newConversionSession(backend, nil, "url", convertOptions{
+		searchPages: 3, topK: 5, workers: 2, matchProfile: "standard", searchIdentity: "auto", searchBudget: 4, verbose: true,
+	}, music2bb.BrowserAuto)
+	var messages []string
+	observer := music2bb.ObserverFunc(func(event music2bb.ProgressEvent) { messages = append(messages, event.Message) })
+	if _, err := session.match(context.Background(), []music2bb.Song{{Name: "one"}}, observer); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(messages, "\n")
+	for _, want := range []string{"已切换登录态继续 1 首", "缓存命中 3", "匿名远程请求 1", "登录远程请求 2", "完成歌曲 1/1", "预算消耗 3/4"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("messages missing %q: %q", want, joined)
+		}
+	}
+}
+
+func TestCacheStatusAndSelectiveClearPreserveAccountCookies(t *testing.T) {
+	root := t.TempDir()
+	configDir := filepath.Join(root, "config")
+	cacheDir := filepath.Join(root, "cache")
+	paths := []string{
+		filepath.Join(cacheDir, "search", "v1", "page.json"),
+		filepath.Join(configDir, "conversions", "v1", "checkpoint.json"),
+		filepath.Join(configDir, "decisions", "v1", "decision.json"),
+		filepath.Join(configDir, "cookies", "bilibili-anonymous.json"),
+		filepath.Join(configDir, "cookies", "bilibili.json"),
+	}
+	for _, path := range paths {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("state"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backend := &persistentFakeBackend{fakeBackend: &fakeBackend{}, configDir: configDir, cacheDir: cacheDir}
+	app, out, errOut := testApp(backend)
+	if exit := app.Run(context.Background(), []string{"cache", "status"}); exit != ExitSuccess {
+		t.Fatalf("status exit=%d stderr=%q", exit, errOut.String())
+	}
+	for _, want := range []string{"search\tfiles=1", "checkpoints\tfiles=1", "decisions\tfiles=1", "anonymous-identity\tfiles=1"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("status missing %q: %q", want, out.String())
+		}
+	}
+	out.Reset()
+	if exit := app.Run(context.Background(), []string{"cache", "clear", "--search", "--checkpoints", "--decisions", "--anonymous-identity"}); exit != ExitSuccess {
+		t.Fatalf("clear exit=%d stderr=%q", exit, errOut.String())
+	}
+	for _, path := range paths[:4] {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("cleared path still exists: %s (%v)", path, err)
+		}
+	}
+	if payload, err := os.ReadFile(paths[4]); err != nil || string(payload) != "state" {
+		t.Fatalf("account cookie changed: %q, %v", payload, err)
+	}
+	if backend.resets != 1 {
+		t.Fatalf("anonymous resets = %d", backend.resets)
+	}
+	for _, path := range paths[:4] {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("state"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if exit := app.Run(context.Background(), []string{"cache", "clear", "--all"}); exit != ExitSuccess {
+		t.Fatalf("clear --all exit=%d stderr=%q", exit, errOut.String())
+	}
+	for _, path := range paths[:4] {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("--all path still exists: %s (%v)", path, err)
+		}
+	}
+	if payload, err := os.ReadFile(paths[4]); err != nil || string(payload) != "state" {
+		t.Fatalf("--all changed account cookie: %q, %v", payload, err)
+	}
+	if backend.resets != 2 {
+		t.Fatalf("anonymous resets after --all = %d", backend.resets)
 	}
 }
 

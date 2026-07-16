@@ -31,6 +31,20 @@ type conversionCheckpoint struct {
 	SourceURL  string                    `json:"sourceURL"`
 	UpdatedAt  time.Time                 `json:"updatedAt"`
 	Songs      map[string]checkpointSong `json:"songs"`
+	// Writes is additive to the v1 schema so checkpoints created before write
+	// recovery remain readable without migration.
+	Writes map[string]favoriteWriteReceipt `json:"writes,omitempty"`
+}
+
+type favoriteWriteReceipt struct {
+	FavoriteID int64                         `json:"favoriteID"`
+	Succeeded  map[string]time.Time          `json:"succeeded"`
+	Failed     map[string]failedWriteReceipt `json:"failed,omitempty"`
+}
+
+type failedWriteReceipt struct {
+	Reason    string    `json:"reason"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 type checkpointSong struct {
@@ -207,6 +221,62 @@ func (s *conversionState) removeDecision(song music2bb.Song) error {
 	return nil
 }
 
+func (s *conversionState) successfulWrites(favoriteID int64) (map[string]struct{}, error) {
+	result := make(map[string]struct{})
+	if s == nil {
+		return result, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.loadCheckpointLocked(); err != nil {
+		return nil, err
+	}
+	receipt, ok := s.document.Writes[fmt.Sprint(favoriteID)]
+	if !ok || receipt.FavoriteID != favoriteID {
+		return result, nil
+	}
+	for bvid := range receipt.Succeeded {
+		result[bvid] = struct{}{}
+	}
+	return result, nil
+}
+
+func (s *conversionState) saveWriteReceipt(item music2bb.WriteReceipt) error {
+	favoriteID, bvid := item.FavoriteID, strings.TrimSpace(item.BVID)
+	if s == nil || favoriteID <= 0 || strings.TrimSpace(bvid) == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.loadCheckpointLocked(); err != nil {
+		return err
+	}
+	key := fmt.Sprint(favoriteID)
+	receipt := s.document.Writes[key]
+	if receipt.Succeeded == nil {
+		receipt = favoriteWriteReceipt{
+			FavoriteID: favoriteID, Succeeded: make(map[string]time.Time), Failed: make(map[string]failedWriteReceipt),
+		}
+	}
+	if receipt.Failed == nil {
+		receipt.Failed = make(map[string]failedWriteReceipt)
+	}
+	now := s.now().UTC()
+	if item.Succeeded {
+		receipt.Succeeded[bvid] = now
+		delete(receipt.Failed, bvid)
+	} else {
+		receipt.Failed[bvid] = failedWriteReceipt{Reason: item.Reason, UpdatedAt: now}
+	}
+	s.document.Writes[key] = receipt
+	s.document.UpdatedAt = now
+	return writeStateJSON(s.checkpointPath, s.document)
+}
+
+func (s *conversionState) saveWriteSuccess(favoriteID int64, bvid string) error {
+	return s.saveWriteReceipt(music2bb.WriteReceipt{FavoriteID: favoriteID, BVID: bvid, Succeeded: true})
+}
+
 func (s *conversionState) loadCheckpointLocked() error {
 	if s.loaded {
 		return s.loadErr
@@ -228,6 +298,38 @@ func (s *conversionState) loadCheckpointLocked() error {
 		}
 		s.loadErr = fmt.Errorf("conversion checkpoint %s is corrupt; original file preserved: %w", s.checkpointPath, err)
 		return s.loadErr
+	}
+	if document.Writes == nil {
+		document.Writes = make(map[string]favoriteWriteReceipt)
+	}
+	for key, receipt := range document.Writes {
+		if receipt.FavoriteID <= 0 || key != fmt.Sprint(receipt.FavoriteID) {
+			s.loadErr = fmt.Errorf("conversion checkpoint %s is corrupt; original file preserved: invalid write receipt destination", s.checkpointPath)
+			return s.loadErr
+		}
+		if receipt.Succeeded == nil {
+			receipt.Succeeded = make(map[string]time.Time)
+		}
+		if receipt.Failed == nil {
+			receipt.Failed = make(map[string]failedWriteReceipt)
+		}
+		for bvid, updatedAt := range receipt.Succeeded {
+			if strings.TrimSpace(bvid) == "" || updatedAt.IsZero() {
+				s.loadErr = fmt.Errorf("conversion checkpoint %s is corrupt; original file preserved: invalid successful write receipt", s.checkpointPath)
+				return s.loadErr
+			}
+		}
+		for bvid, failure := range receipt.Failed {
+			if strings.TrimSpace(bvid) == "" || failure.UpdatedAt.IsZero() {
+				s.loadErr = fmt.Errorf("conversion checkpoint %s is corrupt; original file preserved: invalid failed write receipt", s.checkpointPath)
+				return s.loadErr
+			}
+			if _, succeeded := receipt.Succeeded[bvid]; succeeded {
+				s.loadErr = fmt.Errorf("conversion checkpoint %s is corrupt; original file preserved: conflicting write receipts", s.checkpointPath)
+				return s.loadErr
+			}
+		}
+		document.Writes[key] = receipt
 	}
 	s.document = document
 	return nil
@@ -264,7 +366,7 @@ func (s *conversionState) decisionPath(sourceID string) string {
 func newCheckpointDocument(playlistID, rawURL string) conversionCheckpoint {
 	return conversionCheckpoint{
 		Version: conversionStateVersion, PlaylistID: playlistID, SourceURL: rawURL,
-		Songs: make(map[string]checkpointSong),
+		Songs: make(map[string]checkpointSong), Writes: make(map[string]favoriteWriteReceipt),
 	}
 }
 

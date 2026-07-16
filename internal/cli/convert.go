@@ -43,8 +43,8 @@ func (a *App) runConvert(ctx context.Context, args []string) int {
 		searchPages: 3, topK: 5, workers: 2, matchProfile: string(music2bb.MatchProfileStandard),
 		searchIdentity: "auto", searchBudget: 4, browser: string(music2bb.BrowserAuto), qrLogin: true,
 	}
-	set.IntVar(&options.searchPages, "search-pages", options.searchPages, "每首歌曲搜索页数")
-	set.IntVar(&options.topK, "top-k", options.topK, "保留候选数量")
+	set.IntVar(&options.searchPages, "search-pages", options.searchPages, "每个自适应查询最多搜索页数")
+	set.IntVar(&options.topK, "top-k", options.topK, "保留候选数量（不增加请求）")
 	set.IntVar(&options.workers, "workers", options.workers, "并发匹配数量")
 	set.StringVar(&options.matchProfile, "match-profile", options.matchProfile, "standard|classical")
 	set.StringVar(&options.searchIdentity, "search-identity", options.searchIdentity, "auto|anonymous|session")
@@ -53,8 +53,8 @@ func (a *App) runConvert(ctx context.Context, args []string) int {
 	set.BoolVar(&options.yes, "yes", false, "无需确认")
 	set.StringVar(&options.browser, "browser", options.browser, "auto|never|always")
 	set.StringVar(&options.configDir, "config-dir", "", "配置目录")
-	set.BoolVar(&options.verbose, "verbose", false, "详细日志")
-	set.BoolVar(&options.verbose, "v", false, "详细日志")
+	set.BoolVar(&options.verbose, "verbose", false, "输出缓存、身份、预算和停止原因")
+	set.BoolVar(&options.verbose, "v", false, "输出缓存、身份、预算和停止原因")
 	set.BoolVar(&options.manualReview, "manual-review", false, "手动审核自动匹配")
 	set.BoolVar(&options.manual, "manual", false, "完全手动匹配")
 	set.BoolVar(&options.qrLogin, "qr-login", true, "允许扫码登录")
@@ -174,7 +174,7 @@ func (a *App) runPlainConvert(ctx context.Context, session *conversionSession) i
 		return ExitNoMatches
 	}
 	fmt.Fprintf(a.IO.Out, "匹配成功: %d/%d\n", matched, len(outcomes))
-	account, err := session.prepareWrite(ctx, observer)
+	account, err := session.prepareWrite(ctx, observer, outcomes)
 	if err != nil {
 		fmt.Fprintf(a.IO.Err, "登录失败: %v\n", err)
 		return exitFor(err)
@@ -204,7 +204,7 @@ func (a *App) runPlainConvert(ctx context.Context, session *conversionSession) i
 		}
 	}
 	result, err := session.write(ctx, favorite.ID, outcomes, observer)
-	fmt.Fprintf(a.IO.Out, "成功: %d | 失败: %d\n", len(result.Succeeded), len(result.Failed))
+	fmt.Fprintf(a.IO.Out, "成功: %d | 失败: %d | 已存在: %d\n", len(result.Succeeded), len(result.Failed), len(result.Skipped))
 	for _, failure := range result.Failed {
 		fmt.Fprintf(a.IO.Err, "✗ %s: %s\n", failure.BVID, failure.Reason)
 	}
@@ -247,7 +247,7 @@ func (a *App) manualMatchAll(ctx context.Context, session *conversionSession, so
 }
 
 func (a *App) manualMatch(ctx context.Context, session *conversionSession, song music2bb.Song) music2bb.MatchResult {
-	outcome := music2bb.MatchResult{Song: song}
+	outcome := music2bb.MatchResult{Song: song, NeedsReview: true, ReviewReason: music2bb.ReviewNotSearched, SearchStatus: music2bb.SearchStatusNotSearched}
 	if !a.IO.Interactive {
 		return outcome
 	}
@@ -282,6 +282,8 @@ func (a *App) manualMatch(ctx context.Context, session *conversionSession, song 
 	}
 	if strings.EqualFold(choice, "x") {
 		outcome.NeedsReview = false
+		outcome.ReviewReason = music2bb.ReviewNone
+		outcome.SearchStatus = music2bb.SearchStatusCompleted
 		if saveErr := session.recordDecision(outcome, true); saveErr != nil {
 			fmt.Fprintf(a.IO.Err, "保存跳过决定失败: %v\n", saveErr)
 		}
@@ -358,6 +360,8 @@ func (a *App) reviewMatches(ctx context.Context, session *conversionSession, out
 				outcomes[index].Video = nil
 				outcomes[index].HasSelection = false
 				outcomes[index].NeedsReview = false
+				outcomes[index].ReviewReason = music2bb.ReviewNone
+				outcomes[index].SearchStatus = music2bb.SearchStatusCompleted
 				if saveErr := session.recordDecision(outcomes[index], true); saveErr != nil {
 					fmt.Fprintf(a.IO.Err, "保存跳过决定失败: %v\n", saveErr)
 				}

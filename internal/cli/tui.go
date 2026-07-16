@@ -222,12 +222,12 @@ func (c *tuiController) waitCmd() tea.Cmd {
 	}
 }
 
-func (c *tuiController) favoritesCmd() tea.Cmd {
+func (c *tuiController) favoritesCmd(outcomes []music2bb.MatchResult) tea.Cmd {
 	return c.command(func() {
 		if !c.send(tuiPhaseMsg{phase: phaseLogin, text: "正在登录 Bilibili"}) {
 			return
 		}
-		account, loginErr := c.session.prepareWrite(c.ctx, c.observer())
+		account, loginErr := c.session.prepareWrite(c.ctx, c.observer(), outcomes)
 		if !c.send(tuiAccountMsg{account: account, err: loginErr}) || loginErr != nil {
 			return
 		}
@@ -604,7 +604,9 @@ func (m *tuiModel) applyObserver(event music2bb.ProgressEvent) {
 		}
 	}
 	if event.Kind == music2bb.EventVideo && event.Operation == "add_favorite" && event.Message != "" {
-		m.writeResult.Succeeded = append(m.writeResult.Succeeded, event.Message)
+		if event.WriteReceipt == nil || event.WriteReceipt.Succeeded {
+			m.writeResult.Succeeded = append(m.writeResult.Succeeded, event.Message)
+		}
 	}
 }
 
@@ -756,7 +758,7 @@ func (m *tuiModel) updateReview(key string) (tea.Model, tea.Cmd) {
 		m.phase = phaseFavorite
 		m.phaseText = "选择目标收藏夹"
 		m.validation = "正在加载收藏夹…"
-		return *m, m.controller.favoritesCmd()
+		return *m, m.controller.favoritesCmd(cloneMatchResults(m.outcomes))
 	}
 	return *m, nil
 }
@@ -792,7 +794,7 @@ func (m *tuiModel) updateFavorite(key string) (tea.Model, tea.Cmd) {
 		return *m, m.input.Focus()
 	case "r":
 		m.validation = "正在重新加载收藏夹…"
-		return *m, m.controller.favoritesCmd()
+		return *m, m.controller.favoritesCmd(cloneMatchResults(m.outcomes))
 	}
 	return *m, nil
 }
@@ -977,6 +979,8 @@ func (m *tuiModel) skipCurrent() {
 	m.outcomes[m.songCursor].HasSelection = false
 	m.outcomes[m.songCursor].Video = nil
 	m.outcomes[m.songCursor].NeedsReview = false
+	m.outcomes[m.songCursor].ReviewReason = music2bb.ReviewNone
+	m.outcomes[m.songCursor].SearchStatus = music2bb.SearchStatusCompleted
 	if err := m.controller.session.recordDecision(m.outcomes[m.songCursor], true); err != nil {
 		m.validation = "歌曲已跳过，但保存决定失败: " + err.Error()
 	} else {
@@ -1491,7 +1495,7 @@ func (m tuiModel) buildReceipt(result music2bb.AddResult, err error) string {
 	if destination == "" {
 		destination = strconv.FormatInt(result.FavoriteID, 10)
 	}
-	receipt := fmt.Sprintf("写入回执 · %s\n成功: %d | 失败: %d | 跳过: %d", destination, len(result.Succeeded), len(result.Failed), skipped)
+	receipt := fmt.Sprintf("写入回执 · %s\n成功: %d | 失败: %d | 已存在: %d | 歌曲跳过: %d", destination, len(result.Succeeded), len(result.Failed), len(result.Skipped), skipped)
 	if err != nil {
 		receipt += "\n状态: " + err.Error()
 	}
