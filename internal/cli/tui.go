@@ -166,7 +166,7 @@ func (c *tuiController) observer() music2bb.Observer {
 func (c *tuiController) startCmd() tea.Cmd {
 	return c.command(func() {
 		c.started.Store(true)
-		c.prepare(true, nil)
+		c.prepare(false, nil)
 	})
 }
 
@@ -224,6 +224,13 @@ func (c *tuiController) waitCmd() tea.Cmd {
 
 func (c *tuiController) favoritesCmd() tea.Cmd {
 	return c.command(func() {
+		if !c.send(tuiPhaseMsg{phase: phaseLogin, text: "正在登录 Bilibili"}) {
+			return
+		}
+		account, loginErr := c.session.prepareWrite(c.ctx, c.observer())
+		if !c.send(tuiAccountMsg{account: account, err: loginErr}) || loginErr != nil {
+			return
+		}
 		favorites, err := c.session.favorites(c.ctx)
 		c.send(tuiFavoritesMsg{favorites: favorites, err: err})
 	})
@@ -1586,6 +1593,12 @@ func reviewReasonText(reason music2bb.ReviewReason) string {
 		return "歌手未验证"
 	case music2bb.ReviewAmbiguous:
 		return "候选分数接近"
+	case music2bb.ReviewRiskControl:
+		return "搜索触发风控"
+	case music2bb.ReviewNotSearched:
+		return "尚未搜索"
+	case music2bb.ReviewBudgetExhausted:
+		return "搜索预算已用尽"
 	default:
 		return "无需审核"
 	}

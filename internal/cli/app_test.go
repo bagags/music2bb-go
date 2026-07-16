@@ -18,7 +18,10 @@ type fakeBackend struct {
 	parse       func(context.Context, string, music2bb.ParseOptions, music2bb.Observer) ([]music2bb.Song, error)
 	created     music2bb.CreateFavoriteRequest
 	match       []music2bb.MatchResult
+	matchFunc   func([]music2bb.Song, music2bb.MatchOptions) ([]music2bb.MatchResult, error)
+	matchCalls  int
 	addedTo     int64
+	addCalls    int
 	loginErr    error
 	loginCalls  int
 	logoutErr   error
@@ -45,7 +48,11 @@ func (f *fakeBackend) ParsePlaylistWithOptions(ctx context.Context, rawURL strin
 }
 
 func (f *fakeBackend) Match(_ context.Context, songs []music2bb.Song, opts music2bb.MatchOptions, _ music2bb.Observer) ([]music2bb.MatchResult, error) {
+	f.matchCalls++
 	f.matchOpts = opts
+	if f.matchFunc != nil {
+		return f.matchFunc(songs, opts)
+	}
 	if f.match != nil {
 		return append([]music2bb.MatchResult(nil), f.match...), nil
 	}
@@ -72,6 +79,7 @@ func (f *fakeBackend) CreateFavorite(_ context.Context, request music2bb.CreateF
 }
 
 func (f *fakeBackend) AddToFavorite(_ context.Context, favoriteID int64, _ []music2bb.MatchResult, _ music2bb.Observer) (music2bb.AddResult, error) {
+	f.addCalls++
 	f.addedTo = favoriteID
 	return music2bb.AddResult{FavoriteID: favoriteID, Succeeded: []string{"BV1"}}, nil
 }
@@ -122,7 +130,10 @@ func TestConvertInterspersedOptions(t *testing.T) {
 	if exit != ExitSuccess {
 		t.Fatalf("exit = %d, stderr=%s", exit, errOut.String())
 	}
-	if backend.matchOpts != (music2bb.MatchOptions{SearchPages: 2, TopK: 5, Workers: 3, Profile: music2bb.MatchProfileClassical}) {
+	if backend.matchOpts != (music2bb.MatchOptions{
+		SearchPages: 2, TopK: 5, Workers: 3, Profile: music2bb.MatchProfileClassical,
+		SearchIdentity: music2bb.SearchIdentityAnonymous, SearchBudget: 4,
+	}) {
 		t.Fatalf("match options = %#v", backend.matchOpts)
 	}
 	if backend.loginOpts.AllowQR {
@@ -151,8 +162,79 @@ func TestConversionSessionPropagatesProfileToManualSearch(t *testing.T) {
 	if _, err := session.search(context.Background(), music2bb.Song{Name: "song"}, "query"); err != nil {
 		t.Fatal(err)
 	}
-	if backend.searchOpts != (music2bb.CandidateSearchOptions{Limit: 10, Profile: music2bb.MatchProfileClassical}) {
+	if backend.searchOpts != (music2bb.CandidateSearchOptions{Limit: 10, Profile: music2bb.MatchProfileClassical, SearchIdentity: music2bb.SearchIdentityAnonymous}) {
 		t.Fatalf("search options = %#v", backend.searchOpts)
+	}
+}
+
+func TestConvertDelaysLoginUntilAnonymousSearchNeedsFallback(t *testing.T) {
+	backend := &fakeBackend{}
+	backend.parse = func(context.Context, string, music2bb.ParseOptions, music2bb.Observer) ([]music2bb.Song, error) {
+		if backend.loginCalls != 0 {
+			t.Fatal("login happened before playlist parsing")
+		}
+		return []music2bb.Song{{Name: "done"}, {Name: "retry"}}, nil
+	}
+	backend.matchFunc = func(songs []music2bb.Song, opts music2bb.MatchOptions) ([]music2bb.MatchResult, error) {
+		if opts.SearchIdentity == music2bb.SearchIdentityAnonymous {
+			if backend.loginCalls != 0 {
+				t.Fatal("login happened before anonymous matching")
+			}
+			video := music2bb.Video{BVID: "BVdone", Title: "done"}
+			return []music2bb.MatchResult{
+				{Song: songs[0], Video: &video, HasSelection: true, SearchStatus: music2bb.SearchStatusCompleted, RemoteRequests: 1},
+				{Song: songs[1], NeedsReview: true, ReviewReason: music2bb.ReviewRiskControl, SearchStatus: music2bb.SearchStatusRiskControl, RemoteRequests: 1, RiskReason: music2bb.RiskControlVoucher},
+			}, &music2bb.BatchError{Category: music2bb.ErrorNetwork, HaltReason: music2bb.RiskControlVoucher, SearchIdentity: music2bb.SearchIdentityAnonymous}
+		}
+		video := music2bb.Video{BVID: "BVretry", Title: "retry"}
+		return []music2bb.MatchResult{{Song: songs[0], Video: &video, HasSelection: true, SearchStatus: music2bb.SearchStatusCompleted, RemoteRequests: 1}}, nil
+	}
+	app, _, errOut := testApp(backend)
+	exit := app.Run(context.Background(), []string{"convert", "https://example.test/list", "--no-tui", "--favorite", "target", "--yes"})
+	if exit != ExitSuccess {
+		t.Fatalf("exit = %d, stderr=%q", exit, errOut.String())
+	}
+	if backend.matchCalls != 2 || backend.loginCalls != 1 || backend.addCalls != 1 {
+		t.Fatalf("calls = match %d login %d add %d", backend.matchCalls, backend.loginCalls, backend.addCalls)
+	}
+}
+
+func TestSessionBlocksWritesAfterSessionRiskControl(t *testing.T) {
+	backend := &fakeBackend{}
+	backend.matchFunc = func(songs []music2bb.Song, opts music2bb.MatchOptions) ([]music2bb.MatchResult, error) {
+		outcome := music2bb.MatchResult{
+			Song: songs[0], NeedsReview: true, ReviewReason: music2bb.ReviewRiskControl,
+			SearchStatus: music2bb.SearchStatusRiskControl, RemoteRequests: 1, RiskReason: music2bb.RiskControlCode412,
+		}
+		return []music2bb.MatchResult{outcome}, &music2bb.BatchError{
+			Category: music2bb.ErrorNetwork, HaltReason: music2bb.RiskControlCode412, SearchIdentity: opts.SearchIdentity,
+		}
+	}
+	session := newConversionSession(backend, nil, "url", convertOptions{
+		matchProfile: string(music2bb.MatchProfileStandard), searchIdentity: "auto", searchPages: 3, topK: 5, workers: 2, searchBudget: 4,
+	}, music2bb.BrowserAuto)
+	outcomes, err := session.match(context.Background(), []music2bb.Song{{Name: "song"}}, nil)
+	if riskReasonOf(err) != music2bb.RiskControlCode412 || len(outcomes) != 1 {
+		t.Fatalf("match = %#v, %v", outcomes, err)
+	}
+	if _, writeErr := session.write(context.Background(), 9, outcomes, nil); writeErr == nil {
+		t.Fatal("write succeeded after session risk control")
+	}
+	if backend.addCalls != 0 {
+		t.Fatalf("favorite write calls = %d, want zero", backend.addCalls)
+	}
+}
+
+func TestOrdinarySearchFailureDoesNotTriggerLoginFallback(t *testing.T) {
+	backend := &fakeBackend{}
+	backend.matchFunc = func(songs []music2bb.Song, _ music2bb.MatchOptions) ([]music2bb.MatchResult, error) {
+		return []music2bb.MatchResult{{Song: songs[0], NeedsReview: true, ReviewReason: music2bb.ReviewSearchFailed, SearchStatus: music2bb.SearchStatusFailed}},
+			&music2bb.BatchError{Category: music2bb.ErrorNetwork, Failures: []music2bb.ItemFailure{{Index: 0, Reason: "timeout"}}}
+	}
+	session := newConversionSession(backend, nil, "url", convertOptions{matchProfile: "standard", searchIdentity: "auto", searchPages: 3, topK: 5, workers: 2, searchBudget: 4}, music2bb.BrowserAuto)
+	_, _ = session.match(context.Background(), []music2bb.Song{{Name: "song"}}, nil)
+	if backend.loginCalls != 0 {
+		t.Fatalf("ordinary failure triggered %d login call(s)", backend.loginCalls)
 	}
 }
 

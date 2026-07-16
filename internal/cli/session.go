@@ -2,9 +2,11 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	music2bb "github.com/bagags/music2bb-go"
 )
@@ -13,11 +15,16 @@ import (
 // frontends. It owns conversion policy while leaving presentation to the
 // caller.
 type conversionSession struct {
-	backend Backend
-	browser BrowserManager
-	rawURL  string
-	options convertOptions
-	policy  music2bb.BrowserPolicy
+	backend      Backend
+	browser      BrowserManager
+	rawURL       string
+	options      convertOptions
+	policy       music2bb.BrowserPolicy
+	loginMu      sync.Mutex
+	account      music2bb.Account
+	loggedIn     bool
+	writeBlocked bool
+	haltReason   music2bb.RiskControlReason
 }
 
 func newConversionSession(backend Backend, browser BrowserManager, rawURL string, options convertOptions, policy music2bb.BrowserPolicy) *conversionSession {
@@ -29,7 +36,16 @@ func shouldUseTUI(io IO, disabled bool) bool {
 }
 
 func (s *conversionSession) login(ctx context.Context, observer music2bb.Observer) (music2bb.Account, error) {
-	return s.backend.LoginWithOptions(ctx, music2bb.LoginOptions{UseStoredCookies: true, AllowQR: s.options.qrLogin}, observer)
+	s.loginMu.Lock()
+	defer s.loginMu.Unlock()
+	if s.loggedIn {
+		return s.account, nil
+	}
+	account, err := s.backend.LoginWithOptions(ctx, music2bb.LoginOptions{UseStoredCookies: true, AllowQR: s.options.qrLogin}, observer)
+	if err == nil {
+		s.account, s.loggedIn = account, true
+	}
+	return account, err
 }
 
 func (s *conversionSession) parse(ctx context.Context, observer music2bb.Observer) ([]music2bb.Song, error) {
@@ -75,18 +91,97 @@ func (s *conversionSession) match(ctx context.Context, songs []music2bb.Song, ob
 		}
 		return outcomes, nil
 	}
-	return s.backend.Match(ctx, songs, music2bb.MatchOptions{
-		SearchPages: s.options.searchPages,
-		TopK:        s.options.topK,
-		Workers:     s.options.workers,
-		Profile:     music2bb.MatchProfile(s.options.matchProfile),
-	}, observer)
+	identity := music2bb.SearchIdentityAnonymous
+	if s.options.searchIdentity == string(music2bb.SearchIdentitySession) {
+		if _, err := s.login(ctx, observer); err != nil {
+			return nil, err
+		}
+		identity = music2bb.SearchIdentitySession
+	}
+	baseOptions := music2bb.MatchOptions{
+		SearchPages:    s.options.searchPages,
+		TopK:           s.options.topK,
+		Workers:        s.options.workers,
+		Profile:        music2bb.MatchProfile(s.options.matchProfile),
+		SearchIdentity: identity,
+		SearchBudget:   s.options.searchBudget,
+	}
+	outcomes, err := s.backend.Match(ctx, songs, baseOptions, observer)
+	if riskReasonOf(err) == "" || identity == music2bb.SearchIdentitySession || s.options.searchIdentity != "auto" {
+		if riskReasonOf(err) != "" {
+			s.blockWrites(riskReasonOf(err))
+		}
+		return outcomes, err
+	}
+	if _, loginErr := s.login(ctx, observer); loginErr != nil {
+		s.blockWrites(riskReasonOf(err))
+		return outcomes, loginErr
+	}
+	var firstErr error
+	for index := range outcomes {
+		if outcomes[index].SearchStatus != music2bb.SearchStatusNotSearched && outcomes[index].SearchStatus != music2bb.SearchStatusRiskControl {
+			continue
+		}
+		remaining := s.options.searchBudget - outcomes[index].RemoteRequests
+		if remaining <= 0 {
+			outcomes[index].SearchStatus = music2bb.SearchStatusBudgetExhausted
+			outcomes[index].ReviewReason = music2bb.ReviewBudgetExhausted
+			outcomes[index].RiskReason = ""
+			continue
+		}
+		fallbackOptions := baseOptions
+		fallbackOptions.Workers = 1
+		fallbackOptions.SearchIdentity = music2bb.SearchIdentitySession
+		fallbackOptions.SearchBudget = remaining
+		fallback, fallbackErr := s.backend.Match(ctx, []music2bb.Song{songs[index]}, fallbackOptions, observer)
+		if len(fallback) == 1 {
+			fallback[0].RemoteRequests += outcomes[index].RemoteRequests
+			outcomes[index] = fallback[0]
+		}
+		if reason := riskReasonOf(fallbackErr); reason != "" {
+			s.blockWrites(reason)
+			for pending := index + 1; pending < len(outcomes); pending++ {
+				if outcomes[pending].SearchStatus == music2bb.SearchStatusNotSearched || outcomes[pending].SearchStatus == music2bb.SearchStatusRiskControl {
+					outcomes[pending].SearchStatus = music2bb.SearchStatusNotSearched
+					outcomes[pending].ReviewReason = music2bb.ReviewNotSearched
+					outcomes[pending].RiskReason = ""
+				}
+			}
+			return outcomes, fallbackErr
+		}
+		if fallbackErr != nil && firstErr == nil {
+			firstErr = fallbackErr
+		}
+	}
+	return outcomes, firstErr
 }
 
 func (s *conversionSession) search(ctx context.Context, song music2bb.Song, query string) ([]music2bb.MatchResult, error) {
-	return s.backend.SearchCandidatesWithOptions(ctx, song, query, music2bb.CandidateSearchOptions{
-		Limit: 10, Profile: music2bb.MatchProfile(s.options.matchProfile),
-	})
+	identity := music2bb.SearchIdentityAnonymous
+	if s.options.searchIdentity == string(music2bb.SearchIdentitySession) {
+		if _, err := s.login(ctx, nil); err != nil {
+			return nil, err
+		}
+		identity = music2bb.SearchIdentitySession
+	}
+	options := music2bb.CandidateSearchOptions{Limit: 10, Profile: music2bb.MatchProfile(s.options.matchProfile), SearchIdentity: identity}
+	candidates, err := s.backend.SearchCandidatesWithOptions(ctx, song, query, options)
+	if riskReasonOf(err) == "" || s.options.searchIdentity != "auto" {
+		if reason := riskReasonOf(err); reason != "" {
+			s.blockWrites(reason)
+		}
+		return candidates, err
+	}
+	if _, loginErr := s.login(ctx, nil); loginErr != nil {
+		s.blockWrites(riskReasonOf(err))
+		return nil, loginErr
+	}
+	options.SearchIdentity = music2bb.SearchIdentitySession
+	candidates, err = s.backend.SearchCandidatesWithOptions(ctx, song, query, options)
+	if reason := riskReasonOf(err); reason != "" {
+		s.blockWrites(reason)
+	}
+	return candidates, err
 }
 
 func (s *conversionSession) videoDetail(ctx context.Context, bvid string) (music2bb.Video, error) {
@@ -94,15 +189,67 @@ func (s *conversionSession) videoDetail(ctx context.Context, bvid string) (music
 }
 
 func (s *conversionSession) favorites(ctx context.Context) ([]music2bb.Favorite, error) {
+	if _, err := s.prepareWrite(ctx, nil); err != nil {
+		return nil, err
+	}
 	return s.backend.ListFavorites(ctx)
 }
 
+func (s *conversionSession) prepareWrite(ctx context.Context, observer music2bb.Observer) (music2bb.Account, error) {
+	if err := s.ensureWritesAllowed(); err != nil {
+		return music2bb.Account{}, err
+	}
+	return s.login(ctx, observer)
+}
+
 func (s *conversionSession) createFavorite(ctx context.Context, request music2bb.CreateFavoriteRequest) (music2bb.Favorite, error) {
+	if err := s.ensureWritesAllowed(); err != nil {
+		return music2bb.Favorite{}, err
+	}
 	return s.backend.CreateFavorite(ctx, request)
 }
 
 func (s *conversionSession) write(ctx context.Context, favoriteID int64, outcomes []music2bb.MatchResult, observer music2bb.Observer) (music2bb.AddResult, error) {
+	if err := s.ensureWritesAllowed(); err != nil {
+		return music2bb.AddResult{}, err
+	}
 	return s.backend.AddToFavorite(ctx, favoriteID, outcomes, observer)
+}
+
+func riskReasonOf(err error) music2bb.RiskControlReason {
+	if err == nil {
+		return ""
+	}
+	var batch *music2bb.BatchError
+	if errors.As(err, &batch) && batch.HaltReason != "" {
+		return batch.HaltReason
+	}
+	var operation *music2bb.Error
+	if errors.As(err, &operation) && operation.RiskReason != "" {
+		return operation.RiskReason
+	}
+	type riskControlled interface{ RiskControlReason() string }
+	var risk riskControlled
+	if errors.As(err, &risk) {
+		return music2bb.RiskControlReason(risk.RiskControlReason())
+	}
+	return ""
+}
+
+func (s *conversionSession) blockWrites(reason music2bb.RiskControlReason) {
+	s.loginMu.Lock()
+	s.writeBlocked, s.haltReason = true, reason
+	s.loginMu.Unlock()
+}
+
+func (s *conversionSession) ensureWritesAllowed() error {
+	s.loginMu.Lock()
+	blocked, reason := s.writeBlocked, s.haltReason
+	s.loginMu.Unlock()
+	if blocked {
+		return &music2bb.Error{Category: music2bb.ErrorNetwork, Operation: "write", Message: fmt.Sprintf("搜索因风控停止（%s）；本次运行禁止写入收藏夹", reason)}
+	}
+	return nil
 }
 
 func emitSessionWarning(observer music2bb.Observer, operation, message string) {

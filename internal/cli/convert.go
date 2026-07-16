@@ -13,19 +13,21 @@ import (
 )
 
 type convertOptions struct {
-	searchPages  int
-	topK         int
-	workers      int
-	matchProfile string
-	favorite     string
-	yes          bool
-	browser      string
-	configDir    string
-	verbose      bool
-	manual       bool
-	manualReview bool
-	qrLogin      bool
-	noTUI        bool
+	searchPages    int
+	topK           int
+	workers        int
+	matchProfile   string
+	searchIdentity string
+	searchBudget   int
+	favorite       string
+	yes            bool
+	browser        string
+	configDir      string
+	verbose        bool
+	manual         bool
+	manualReview   bool
+	qrLogin        bool
+	noTUI          bool
 }
 
 func (a *App) runConvert(ctx context.Context, args []string) int {
@@ -35,11 +37,16 @@ func (a *App) runConvert(ctx context.Context, args []string) int {
 		fmt.Fprintln(a.IO.Err, "交互终端默认启动全屏审核工作区；使用 --no-tui 强制文本界面。")
 		set.PrintDefaults()
 	}
-	options := convertOptions{searchPages: 3, topK: 3, workers: 4, matchProfile: string(music2bb.MatchProfileStandard), browser: string(music2bb.BrowserAuto), qrLogin: true}
+	options := convertOptions{
+		searchPages: 3, topK: 5, workers: 2, matchProfile: string(music2bb.MatchProfileStandard),
+		searchIdentity: "auto", searchBudget: 4, browser: string(music2bb.BrowserAuto), qrLogin: true,
+	}
 	set.IntVar(&options.searchPages, "search-pages", options.searchPages, "每首歌曲搜索页数")
 	set.IntVar(&options.topK, "top-k", options.topK, "保留候选数量")
 	set.IntVar(&options.workers, "workers", options.workers, "并发匹配数量")
 	set.StringVar(&options.matchProfile, "match-profile", options.matchProfile, "standard|classical")
+	set.StringVar(&options.searchIdentity, "search-identity", options.searchIdentity, "auto|anonymous|session")
+	set.IntVar(&options.searchBudget, "search-budget", options.searchBudget, "每首歌曲最多远程搜索请求数")
 	set.StringVar(&options.favorite, "favorite", "", "收藏夹 ID 或完整名称")
 	set.BoolVar(&options.yes, "yes", false, "无需确认")
 	set.StringVar(&options.browser, "browser", options.browser, "auto|never|always")
@@ -52,7 +59,10 @@ func (a *App) runConvert(ctx context.Context, args []string) int {
 	set.BoolVar(&options.noTUI, "no-tui", false, "使用引导式文本界面")
 	noQR := false
 	set.BoolVar(&noQR, "no-qr-login", false, "禁止扫码登录")
-	valueFlags := map[string]bool{"--search-pages": true, "--top-k": true, "--workers": true, "--match-profile": true, "--favorite": true, "--browser": true, "--config-dir": true}
+	valueFlags := map[string]bool{
+		"--search-pages": true, "--top-k": true, "--workers": true, "--match-profile": true,
+		"--search-identity": true, "--search-budget": true, "--favorite": true, "--browser": true, "--config-dir": true,
+	}
 	if err := set.Parse(interspersed(args, valueFlags)); err != nil {
 		if err == flag.ErrHelp {
 			return ExitSuccess
@@ -62,7 +72,7 @@ func (a *App) runConvert(ctx context.Context, args []string) int {
 	if noQR {
 		options.qrLogin = false
 	}
-	if set.NArg() != 1 || options.searchPages < 1 || options.topK < 1 || options.workers < 1 {
+	if set.NArg() != 1 || options.searchPages < 1 || options.topK < 1 || options.workers < 1 || options.searchBudget < 1 {
 		fmt.Fprintln(a.IO.Err, "用法: music2bb convert <playlist-url> [options]")
 		return ExitInvalidInput
 	}
@@ -74,6 +84,10 @@ func (a *App) runConvert(ctx context.Context, args []string) int {
 	profile := music2bb.MatchProfile(options.matchProfile)
 	if profile != music2bb.MatchProfileStandard && profile != music2bb.MatchProfileClassical {
 		fmt.Fprintln(a.IO.Err, "--match-profile 必须是 standard 或 classical")
+		return ExitInvalidInput
+	}
+	if options.searchIdentity != "auto" && options.searchIdentity != string(music2bb.SearchIdentityAnonymous) && options.searchIdentity != string(music2bb.SearchIdentitySession) {
+		fmt.Fprintln(a.IO.Err, "--search-identity 必须是 auto、anonymous 或 session")
 		return ExitInvalidInput
 	}
 	if a.Backend == nil {
@@ -102,15 +116,6 @@ func (a *App) runPlainConvert(ctx context.Context, session *conversionSession) i
 			baseObserver.Observe(event)
 		}
 	})
-	account, err := session.login(ctx, observer)
-	if err != nil {
-		fmt.Fprintf(a.IO.Err, "登录失败: %v\n", err)
-		return exitFor(err)
-	}
-	if options.verbose {
-		fmt.Fprintf(a.IO.Err, "已登录: %s\n", account.Name)
-	}
-
 	songs, err := session.parse(ctx, observer)
 	if err != nil && a.IO.Interactive {
 		fmt.Fprintf(a.IO.Err, "自动解析失败: %v\n", err)
@@ -162,6 +167,14 @@ func (a *App) runPlainConvert(ctx context.Context, session *conversionSession) i
 		return ExitNoMatches
 	}
 	fmt.Fprintf(a.IO.Out, "匹配成功: %d/%d\n", matched, len(outcomes))
+	account, err := session.prepareWrite(ctx, observer)
+	if err != nil {
+		fmt.Fprintf(a.IO.Err, "登录失败: %v\n", err)
+		return exitFor(err)
+	}
+	if options.verbose {
+		fmt.Fprintf(a.IO.Err, "已登录: %s\n", account.Name)
+	}
 
 	favorite, err := a.selectFavorite(ctx, session, options.favorite)
 	if err != nil {
