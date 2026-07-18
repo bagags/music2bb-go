@@ -1,0 +1,7 @@
+self-hosted-runner:
+  labels:
+    # GitHub-hosted labels introduced after actionlint's bundled label table.
+    - macos-15-intel
+    - windows-11-arm
+    # Repository-managed Chromium builder pool.
+    - chromium-builder

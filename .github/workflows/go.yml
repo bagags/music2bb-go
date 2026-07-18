@@ -4,13 +4,7 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
-    paths-ignore:
-      - "docs/**"
-      - "**.md"
   pull_request:
-    paths-ignore:
-      - "docs/**"
-      - "**.md"
   workflow_dispatch:
 
 permissions:
@@ -18,7 +12,7 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -31,70 +25,35 @@ jobs:
       - run: go test -run '^$' -tags='live authenticated browser_install' ./...
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - goos: darwin
-            goarch: arm64
-            platform: darwin/arm64
-            output: music2bb-darwin-arm64
-          - goos: darwin
-            goarch: amd64
-            platform: darwin/amd64
-            output: music2bb-darwin-amd64
-          - goos: windows
-            goarch: amd64
-            platform: windows/amd64
-            output: music2bb-windows-amd64.exe
-          - goos: windows
-            goarch: arm64
-            platform: windows/arm64
-            output: music2bb-windows-arm64.exe
+          - {goos: darwin, goarch: arm64, output: music2bb, package: music2bb-darwin-arm64, archive: tar}
+          - {goos: darwin, goarch: amd64, output: music2bb, package: music2bb-darwin-amd64, archive: tar}
+          - {goos: windows, goarch: amd64, output: music2bb.exe, package: music2bb-windows-amd64, archive: zip}
+          - {goos: windows, goarch: arm64, output: music2bb.exe, package: music2bb-windows-arm64, archive: zip}
+          - {goos: linux, goarch: amd64, output: music2bb, package: music2bb-linux-amd64, archive: tar}
+          - {goos: linux, goarch: arm64, output: music2bb, package: music2bb-linux-arm64, archive: tar}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.x"
           cache: true
-      - name: Resolve pinned Chromium provenance
-        id: chromium
-        shell: bash
-        env:
-          PLATFORM: ${{ matrix.platform }}
-        run: |
-          node -e 'const fs=require("fs"),a=require("./internal/browser/manifest.json").artifacts[process.env.PLATFORM]; for (const [k,v] of Object.entries({url:a.archive_url,sha256:a.sha256,revision:a.revision,version:a.chromium_version,commit:a.chromium_commit})) fs.appendFileSync(process.env.GITHUB_OUTPUT, `${k}=${v}\n`)'
-      - uses: actions/cache@v4
-        id: bundled-browser-cache
-        with:
-          path: internal/browser/chromium.zip
-          key: bundled-chromium-${{ steps.chromium.outputs.revision }}-${{ steps.chromium.outputs.sha256 }}-${{ matrix.goos }}-${{ matrix.goarch }}
-      - name: Download bundled Chromium
-        if: steps.bundled-browser-cache.outputs.cache-hit != 'true'
-        env:
-          BROWSER_URL: ${{ steps.chromium.outputs.url }}
-        run: curl --fail --location --retry 3 --output internal/browser/chromium.zip "$BROWSER_URL"
-      - name: Verify bundled Chromium
-        env:
-          BROWSER_SHA256: ${{ steps.chromium.outputs.sha256 }}
-        run: echo "$BROWSER_SHA256  internal/browser/chromium.zip" | sha256sum --check
-      - name: Verify Chromium credits
-        run: echo "$(node -p 'require("./internal/browser/manifest.json").credits.sha256')  CHROMIUM_CREDITS.html" | sha256sum --check
-      - name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+      - name: Build browser-independent executable
         env:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           OUTPUT: ${{ matrix.output }}
-          PACKAGE: music2bb-${{ matrix.goos }}-${{ matrix.goarch }}
+          PACKAGE: ${{ matrix.package }}
           VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('dev-{0}', github.sha) }}
-          CHROMIUM_VERSION: ${{ steps.chromium.outputs.version }}
-          CHROMIUM_REVISION: ${{ steps.chromium.outputs.revision }}
-          CHROMIUM_COMMIT: ${{ steps.chromium.outputs.commit }}
         run: |
           mkdir -p "dist/${PACKAGE}"
           BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          go build -trimpath -tags=bundled_chromium -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${GITHUB_SHA} -X main.date=${BUILD_DATE}" -o "dist/${PACKAGE}/${OUTPUT}" ./cmd/music2bb
+          go build -trimpath -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${GITHUB_SHA} -X main.date=${BUILD_DATE}" -o "dist/${PACKAGE}/${OUTPUT}" ./cmd/music2bb
           cp LICENSE.md DISCLAIMER.md THIRD_PARTY_NOTICES.md CHROMIUM_PROVENANCE.md CHROMIUM_CREDITS.html "dist/${PACKAGE}/"
           cp internal/browser/manifest.json "dist/${PACKAGE}/CHROMIUM_PROVENANCE.json"
           printf '%s\n' \
@@ -102,27 +61,33 @@ jobs:
             "Commit: ${GITHUB_SHA}" \
             "Source repository: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
             "Corresponding source: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/tree/${GITHUB_SHA}" \
-            "Bundled Chromium: ${CHROMIUM_VERSION}" \
-            "Chromium revision: ${CHROMIUM_REVISION}" \
-            "Chromium commit: ${CHROMIUM_COMMIT}" \
+            "Managed Chromium is downloaded separately at runtime and is not included in this package." \
             "Chromium provenance: CHROMIUM_PROVENANCE.md and CHROMIUM_PROVENANCE.json" \
             > "dist/${PACKAGE}/SOURCE.txt"
-          if [[ "${GOOS}" == "windows" ]]; then
-            ARCHIVE="${PACKAGE}.zip"
-            cd dist
-            zip -r "${ARCHIVE}" "${PACKAGE}"
-            rm -rf "${PACKAGE}"
-            sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
+      - name: Verify package excludes Chromium binaries
+        env:
+          PACKAGE: ${{ matrix.package }}
+          OUTPUT: ${{ matrix.output }}
+        run: |
+          test -f "dist/${PACKAGE}/${OUTPUT}"
+          test "$(find "dist/${PACKAGE}" -type f | wc -l)" -eq 8
+          test "$(stat -c '%s' "dist/${PACKAGE}/${OUTPUT}")" -lt 50000000
+      - name: Create release archive and checksum
+        env:
+          PACKAGE: ${{ matrix.package }}
+          ARCHIVE_KIND: ${{ matrix.archive }}
+        run: |
+          if [[ "${ARCHIVE_KIND}" == "zip" ]]; then
+            (cd dist && zip -qr "${PACKAGE}.zip" "${PACKAGE}")
+            sha256sum "dist/${PACKAGE}.zip" > "dist/${PACKAGE}.zip.sha256"
           else
-            ARCHIVE="${PACKAGE}.tar.gz"
-            tar -C dist -czf "dist/${ARCHIVE}" "${PACKAGE}"
-            rm -rf "dist/${PACKAGE}"
-            cd dist
-            sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
+            tar -C dist -czf "dist/${PACKAGE}.tar.gz" "${PACKAGE}"
+            sha256sum "dist/${PACKAGE}.tar.gz" > "dist/${PACKAGE}.tar.gz.sha256"
           fi
+          rm -rf "dist/${PACKAGE}"
       - uses: actions/upload-artifact@v4
         with:
-          name: music2bb-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: ${{ matrix.package }}
           path: dist/*
           if-no-files-found: error
 
@@ -131,26 +96,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-15
-            goos: darwin
-            goarch: arm64
-            platform: darwin/arm64
-            archive: chromium-darwin-arm64.zip
-          - os: macos-15-intel
-            goos: darwin
-            goarch: amd64
-            platform: darwin/amd64
-            archive: chromium-darwin-amd64.zip
-          - os: windows-latest
-            goos: windows
-            goarch: amd64
-            platform: windows/amd64
-            archive: chromium-windows-amd64.zip
-          - os: windows-11-arm
-            goos: windows
-            goarch: arm64
-            platform: windows/arm64
-            archive: chromium-windows-arm64.zip
+          - {os: macos-15, platform: darwin/arm64, archive: chromium-darwin-arm64.zip}
+          - {os: macos-15-intel, platform: darwin/amd64, archive: chromium-darwin-amd64.zip}
+          - {os: windows-latest, platform: windows/amd64, archive: chromium-windows-amd64.zip}
+          - {os: windows-11-arm, platform: windows/arm64, archive: chromium-windows-arm64.zip}
+          - {os: ubuntu-24.04, platform: linux/amd64, archive: chromium-linux-amd64.zip}
+          - {os: ubuntu-24.04-arm, platform: linux/arm64, archive: chromium-linux-arm64.zip}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -158,27 +109,58 @@ jobs:
         with:
           go-version: "1.26.x"
           cache: true
-      - name: Resolve pinned Chromium provenance
+      - name: Resolve pinned managed Chromium
         id: chromium
         shell: bash
         env:
           PLATFORM: ${{ matrix.platform }}
         run: |
-          node -e 'const fs=require("fs"),a=require("./internal/browser/manifest.json").artifacts[process.env.PLATFORM]; for (const [k,v] of Object.entries({url:a.archive_url,revision:a.revision,sha256:a.sha256})) fs.appendFileSync(process.env.GITHUB_OUTPUT, `${k}=${v}\n`)'
+          node - <<'NODE'
+          const fs = require('fs');
+          const artifact = require('./internal/browser/manifest.json').artifacts[process.env.PLATFORM];
+          if (!artifact) throw new Error(`missing artifact for ${process.env.PLATFORM}`);
+          const ready = !artifact.availability;
+          for (const [key, value] of Object.entries({ready, url: artifact.archive_url, revision: artifact.revision, sha256: artifact.sha256})) {
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `${key}=${value}\n`);
+          }
+          NODE
+      - name: Require published managed browser for releases
+        if: startsWith(github.ref, 'refs/tags/v') && steps.chromium.outputs.ready != 'true'
+        shell: bash
+        run: |
+          echo "${{ matrix.platform }} managed browser is not published in the manifest" >&2
+          exit 1
       - uses: actions/cache@v4
+        if: steps.chromium.outputs.ready == 'true'
         id: browser-cache
         with:
           path: .browser-cache/${{ matrix.archive }}
           key: chromium-${{ steps.chromium.outputs.revision }}-${{ steps.chromium.outputs.sha256 }}-${{ matrix.os }}
-      - name: Download pinned Chromium
-        if: steps.browser-cache.outputs.cache-hit != 'true'
+      - name: Download pinned managed Chromium
+        if: steps.chromium.outputs.ready == 'true' && steps.browser-cache.outputs.cache-hit != 'true'
         shell: bash
         env:
           BROWSER_URL: ${{ steps.chromium.outputs.url }}
         run: |
           mkdir -p .browser-cache
           curl --fail --location --retry 3 --output '.browser-cache/${{ matrix.archive }}' "$BROWSER_URL"
+      - name: Verify managed archive checksum
+        if: steps.chromium.outputs.ready == 'true'
+        shell: bash
+        env:
+          BROWSER_SHA256: ${{ steps.chromium.outputs.sha256 }}
+          BROWSER_ARCHIVE: .browser-cache/${{ matrix.archive }}
+        run: |
+          node - <<'NODE'
+          const crypto = require('crypto');
+          const fs = require('fs');
+          const actual = crypto.createHash('sha256').update(fs.readFileSync(process.env.BROWSER_ARCHIVE)).digest('hex');
+          if (actual.toLowerCase() !== process.env.BROWSER_SHA256.toLowerCase()) {
+            throw new Error(`archive checksum ${actual} does not match manifest`);
+          }
+          NODE
       - name: Install, launch, and extract a controlled page
+        if: steps.chromium.outputs.ready == 'true'
         shell: bash
         env:
           MUSIC2BB_TEST_BROWSER_ARCHIVE: ${{ github.workspace }}/.browser-cache/${{ matrix.archive }}
@@ -187,7 +169,7 @@ jobs:
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [test, build, browser-smoke]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
@@ -197,22 +179,16 @@ jobs:
           path: dist
           pattern: music2bb-*
           merge-multiple: true
-      - name: Check whether release exists
-        id: release
+      - name: Refuse to replace an existing release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "release $GITHUB_REF_NAME already exists" >&2
+            exit 1
           fi
-      - name: Create release
-        if: steps.release.outputs.exists != 'true'
+      - name: Create release and upload immutable assets
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes
-      - name: Upload release assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes dist/*

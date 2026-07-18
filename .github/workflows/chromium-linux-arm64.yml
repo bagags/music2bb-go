@@ -1,0 +1,170 @@
+name: Build Chromium Linux ARM64
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CHROMIUM_VERSION: "152.0.7951.0"
+  CHROMIUM_REVISION: "1661846"
+  CHROMIUM_COMMIT: "24394684caab9de1b7f4a3a2f83636e3d1449b56"
+  DEPOT_TOOLS_COMMIT: "1709e20d5ca2afe97bfa726168719c3b77eb9883"
+  BROWSER_TAG: "chromium-152.0.7951.0-r1661846"
+  BROWSER_ARCHIVE: "chromium-linux-arm64.zip"
+  GN_ARGS: >-
+    target_os="linux" target_cpu="arm64" is_debug=false
+    is_official_build=true symbol_level=0 blink_symbol_level=0
+    enable_nacl=false proprietary_codecs=false ffmpeg_branding="Chromium"
+    google_api_key="" google_default_client_id=""
+    google_default_client_secret="" use_thin_lto=false
+
+jobs:
+  build:
+    runs-on: [self-hosted, linux, x64, chromium-builder]
+    timeout-minutes: 720
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: music2bb
+      - name: Verify builder capacity
+        run: |
+          test "$(getconf _PHYS_PAGES)" -ge 7500000
+          test "$(df --output=avail -B1 . | tail -1)" -ge 200000000000
+          test "$(uname -m)" = "x86_64"
+      - name: Check out pinned depot_tools
+        run: |
+          git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git depot_tools
+          git -C depot_tools checkout --detach "$DEPOT_TOOLS_COMMIT"
+          test "$(git -C depot_tools rev-parse HEAD)" = "$DEPOT_TOOLS_COMMIT"
+      - name: Check out exact Chromium source
+        run: |
+          export PATH="$GITHUB_WORKSPACE/depot_tools:$PATH"
+          mkdir chromium
+          cd chromium
+          fetch --nohooks chromium
+          gclient sync --delete_unversioned_trees --revision "src@$CHROMIUM_COMMIT"
+          test "$(git -C src rev-parse HEAD)" = "$CHROMIUM_COMMIT"
+      - name: Provision pinned-source build dependencies
+        run: |
+          export PATH="$GITHUB_WORKSPACE/depot_tools:$PATH"
+          cd chromium/src
+          sudo build/install-build-deps.sh --no-prompt
+          gclient runhooks
+          buildtools/linux64/gn --version
+          third_party/llvm-build/Release+Asserts/bin/clang --version
+          ninja --version
+      - name: Configure and cross-build unbranded Chromium
+        run: |
+          export PATH="$GITHUB_WORKSPACE/depot_tools:$PATH"
+          cd chromium/src
+          buildtools/linux64/gn gen out/arm64 --args="$GN_ARGS"
+          test "$(buildtools/linux64/gn args out/arm64 --list=target_cpu --short)" = 'target_cpu = "arm64"'
+          autoninja -C out/arm64 chrome/installer/linux:stable_deb
+      - name: Package portable chrome-linux layout and exact credits
+        run: |
+          cd chromium/src
+          DEB="$(find out/arm64 -maxdepth 1 -name 'chromium-browser-stable_*_arm64.deb' -print -quit)"
+          test -n "$DEB"
+          mkdir -p package-root staging/chrome-linux
+          dpkg-deb --extract "$DEB" package-root
+          RUNTIME="$(find package-root -type f -name chromium-browser -size +10M -printf '%h\n' -quit)"
+          test -n "$RUNTIME"
+          cp -a "$RUNTIME"/. staging/chrome-linux/
+          if [[ -f staging/chrome-linux/chromium-browser ]]; then
+            mv staging/chrome-linux/chromium-browser staging/chrome-linux/chrome
+          fi
+          test -x staging/chrome-linux/chrome
+          cp LICENSE staging/chrome-linux/LICENSE
+          python3 tools/licenses/licenses.py credits \
+            --target-os linux --gn-out-dir out/arm64 --gn-target //chrome:chrome \
+            staging/chrome-linux/CHROMIUM_CREDITS.html
+          test -s staging/chrome-linux/CHROMIUM_CREDITS.html
+          node -e 'const fs=require("fs"); fs.writeFileSync(process.argv[1], JSON.stringify({origin:"music2bb-build",chromium_version:process.env.CHROMIUM_VERSION,revision:Number(process.env.CHROMIUM_REVISION),chromium_commit:process.env.CHROMIUM_COMMIT,depot_tools_commit:process.env.DEPOT_TOOLS_COMMIT,gn_args:process.env.GN_ARGS,builder_os:"Ubuntu 24.04 x86_64",target_os:"linux",target_cpu:"arm64",source_url:`https://chromium.googlesource.com/chromium/src/+/${process.env.CHROMIUM_COMMIT}`,build_recipe_url:`${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/blob/${process.env.GITHUB_SHA}/.github/workflows/chromium-linux-arm64.yml`,builder_run_url:`${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`}, null, 2)+"\n")' staging/chrome-linux/BUILD_METADATA.json
+          find staging -exec touch -h -d '@0' {} +
+          (cd staging && zip -X -y -q -r "../../../$BROWSER_ARCHIVE" chrome-linux)
+          cd ../..
+          sha256sum "$BROWSER_ARCHIVE" > "$BROWSER_ARCHIVE.sha256"
+          export ARCHIVE_SHA256="$(sha256sum "$BROWSER_ARCHIVE" | cut -d' ' -f1)"
+          export ARCHIVE_BYTES="$(stat -c '%s' "$BROWSER_ARCHIVE")"
+          export PUBLISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          node -e 'const fs=require("fs"); fs.writeFileSync(process.argv[1], JSON.stringify({origin:"music2bb-build",chromium_version:process.env.CHROMIUM_VERSION,revision:Number(process.env.CHROMIUM_REVISION),chromium_commit:process.env.CHROMIUM_COMMIT,depot_tools_commit:process.env.DEPOT_TOOLS_COMMIT,archive_sha256:process.env.ARCHIVE_SHA256,archive_bytes:Number(process.env.ARCHIVE_BYTES),published_at:process.env.PUBLISHED_AT,build_recipe_url:`${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/blob/${process.env.GITHUB_SHA}/.github/workflows/chromium-linux-arm64.yml`,builder_run_url:`${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`}, null, 2)+"\n")' \
+            chromium-linux-arm64-build.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chromium-linux-arm64-build
+          path: |
+            chromium-linux-arm64.zip
+            chromium-linux-arm64.zip.sha256
+            chromium-linux-arm64-build.json
+          if-no-files-found: error
+
+  smoke:
+    needs: build
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: chromium-linux-arm64-build
+          path: browser-build
+      - name: Verify archive and prepare exact test manifest
+        run: |
+          (cd browser-build && sha256sum --check chromium-linux-arm64.zip.sha256)
+          node - <<'NODE'
+          const fs = require('fs');
+          const manifest = require('./internal/browser/manifest.json');
+          const metadata = require('./browser-build/chromium-linux-arm64-build.json');
+          const artifact = manifest.artifacts['linux/arm64'];
+          delete artifact.availability;
+          artifact.sha256 = metadata.archive_sha256;
+          artifact.archive_bytes = metadata.archive_bytes;
+          artifact.published_at = metadata.published_at;
+          artifact.build_recipe_url = metadata.build_recipe_url;
+          artifact.builder_run_url = metadata.builder_run_url;
+          artifact.attestation_url = `${metadata.builder_run_url}/attestations`;
+          fs.writeFileSync('./internal/browser/manifest.json', JSON.stringify(manifest, null, 2) + '\n');
+          NODE
+      - name: Install, launch, and extract a controlled page
+        env:
+          MUSIC2BB_TEST_BROWSER_ARCHIVE: ${{ github.workspace }}/browser-build/chromium-linux-arm64.zip
+        run: go test -count=1 -tags=browser_install ./internal/browser -run TestPinnedArchiveInstallLaunchAndExtraction -v
+
+  publish:
+    needs: smoke
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: chromium-linux-arm64-build
+          path: browser-build
+      - name: Refuse to overwrite the browser release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$BROWSER_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "browser release $BROWSER_TAG already exists" >&2
+            exit 1
+          fi
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: browser-build/chromium-linux-arm64.zip
+      - name: Publish immutable browser assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$BROWSER_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --latest=false \
+            --title "Chromium $CHROMIUM_VERSION Linux ARM64" \
+            --notes "Unbranded Chromium $CHROMIUM_VERSION, revision $CHROMIUM_REVISION, commit $CHROMIUM_COMMIT. Built by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID."
+          gh release upload "$BROWSER_TAG" browser-build/* --repo "$GITHUB_REPOSITORY"
+          gh release edit "$BROWSER_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
