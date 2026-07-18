@@ -32,6 +32,11 @@ type BrowserManager interface {
 	Clear(context.Context) error
 }
 
+type UpdateManager interface {
+	Check(context.Context) (current, latest string, available bool, err error)
+	Update(context.Context) (from, to string, deferred bool, err error)
+}
+
 type IO struct {
 	In          io.Reader
 	Out         io.Writer
@@ -42,6 +47,7 @@ type IO struct {
 type App struct {
 	Backend Backend
 	Browser BrowserManager
+	Updater UpdateManager
 	IO      IO
 	Version string
 	reader  *bufio.Reader
@@ -71,6 +77,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.runBrowser(ctx, commandArgs)
 	case "cache":
 		return a.runCache(ctx, commandArgs)
+	case "update":
+		return a.runUpdate(ctx, commandArgs)
 	case "version":
 		fmt.Fprintln(a.IO.Out, a.Version)
 		return ExitSuccess
@@ -114,6 +122,7 @@ func (a *App) printHelp() {
   music2bb browser install|status|clear
   music2bb cache status
   music2bb cache clear --search|--checkpoints|--decisions|--anonymous-identity|--all
+  music2bb update [check]
   music2bb version
   music2bb license`)
 }

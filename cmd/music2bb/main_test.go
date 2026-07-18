@@ -16,13 +16,16 @@ func TestMainConsumesPublicBackend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	allowedInternal := "github.com/bagags/music2bb-go/internal/cli"
+	allowedInternal := map[string]bool{
+		"github.com/bagags/music2bb-go/internal/cli":        true,
+		"github.com/bagags/music2bb-go/internal/selfupdate": true,
+	}
 	for _, imported := range file.Imports {
 		path, err := strconv.Unquote(imported.Path.Value)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.HasPrefix(path, "github.com/bagags/music2bb-go/internal/") && path != allowedInternal {
+		if strings.HasPrefix(path, "github.com/bagags/music2bb-go/internal/") && !allowedInternal[path] {
 			t.Errorf("main directly imports backend implementation %s", path)
 		}
 	}

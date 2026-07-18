@@ -8,6 +8,7 @@ import (
 
 	music2bb "github.com/bagags/music2bb-go"
 	"github.com/bagags/music2bb-go/internal/cli"
+	"github.com/bagags/music2bb-go/internal/selfupdate"
 	"golang.org/x/term"
 )
 
@@ -41,6 +42,7 @@ func run(args []string) int {
 	application := &cli.App{
 		Backend: engine,
 		Browser: engine.Browser(),
+		Updater: selfupdate.New(version),
 		IO: cli.IO{
 			In:          os.Stdin,
 			Out:         os.Stdout,

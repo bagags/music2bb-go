@@ -151,6 +151,26 @@ func (f fakeBrowser) Install(context.Context, bool) (music2bb.BrowserStatus, err
 }
 func (fakeBrowser) Clear(context.Context) error { return nil }
 
+type fakeUpdater struct {
+	current   string
+	latest    string
+	available bool
+	deferred  bool
+	err       error
+	checks    int
+	updates   int
+}
+
+func (u *fakeUpdater) Check(context.Context) (string, string, bool, error) {
+	u.checks++
+	return u.current, u.latest, u.available, u.err
+}
+
+func (u *fakeUpdater) Update(context.Context) (string, string, bool, error) {
+	u.updates++
+	return u.current, u.latest, u.deferred, u.err
+}
+
 type recordingBrowser struct {
 	status       music2bb.BrowserStatus
 	statusCalls  int
@@ -824,6 +844,56 @@ func TestVersionAndBrowserStatus(t *testing.T) {
 	out.Reset()
 	if exit := app.Run(context.Background(), []string{"browser", "status"}); exit != 0 || !strings.Contains(out.String(), "verified=true") {
 		t.Fatalf("browser exit=%d output=%q", exit, out.String())
+	}
+}
+
+func TestUpdateCheckReportsAvailability(t *testing.T) {
+	app, out, errOut := testApp(&fakeBackend{})
+	updater := &fakeUpdater{current: "v1.2.3", latest: "v1.3.0", available: true}
+	app.Updater = updater
+	if exit := app.Run(context.Background(), []string{"update", "check"}); exit != ExitSuccess {
+		t.Fatalf("exit = %d, stderr = %q", exit, errOut.String())
+	}
+	if updater.checks != 1 || updater.updates != 0 {
+		t.Fatalf("checks = %d, updates = %d", updater.checks, updater.updates)
+	}
+	for _, expected := range []string{"当前版本: v1.2.3", "最新版本: v1.3.0", "music2bb update"} {
+		if !strings.Contains(out.String(), expected) {
+			t.Errorf("output omits %q: %q", expected, out.String())
+		}
+	}
+}
+
+func TestUpdateInstallsAndReportsDeferredWindowsReplacement(t *testing.T) {
+	app, out, errOut := testApp(&fakeBackend{})
+	updater := &fakeUpdater{current: "v1.2.3", latest: "v1.3.0", deferred: true}
+	app.Updater = updater
+	if exit := app.Run(context.Background(), []string{"update"}); exit != ExitSuccess {
+		t.Fatalf("exit = %d, stderr = %q", exit, errOut.String())
+	}
+	if updater.updates != 1 || !strings.Contains(out.String(), "当前进程退出后") {
+		t.Fatalf("updates = %d, output = %q", updater.updates, out.String())
+	}
+}
+
+func TestUpdateRejectsUnknownSubcommandAndReportsNetworkFailure(t *testing.T) {
+	app, _, errOut := testApp(&fakeBackend{})
+	updater := &fakeUpdater{err: errors.New("offline")}
+	app.Updater = updater
+	if exit := app.Run(context.Background(), []string{"update", "later"}); exit != ExitInvalidInput {
+		t.Fatalf("invalid exit = %d", exit)
+	}
+	errOut.Reset()
+	if exit := app.Run(context.Background(), []string{"update", "check"}); exit != ExitExtraction {
+		t.Fatalf("network exit = %d", exit)
+	}
+	if !strings.Contains(errOut.String(), "检查更新失败: offline") {
+		t.Fatalf("stderr = %q", errOut.String())
+	}
+	updater.err = context.Canceled
+	errOut.Reset()
+	if exit := app.Run(context.Background(), []string{"update"}); exit != ExitCancelled {
+		t.Fatalf("cancelled exit = %d", exit)
 	}
 }
 
