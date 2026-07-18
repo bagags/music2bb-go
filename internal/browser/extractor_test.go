@@ -11,7 +11,27 @@ import (
 	"github.com/bagags/music2bb-go/internal/model"
 	"github.com/bagags/music2bb-go/internal/playlist"
 	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/launcher/flags"
 )
+
+func TestProcessLauncherSandboxPolicy(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		noSandbox bool
+		wantFlag  bool
+	}{
+		{name: "sandbox enabled by default"},
+		{name: "sandbox disabled for constrained integration environment", noSandbox: true, wantFlag: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			process := newProcessLauncher(context.Background(), "/test/chromium", test.noSandbox)
+			defer process.Cleanup()
+			if got := process.Has(flags.NoSandbox); got != test.wantFlag {
+				t.Fatalf("no-sandbox flag present = %v, want %v", got, test.wantFlag)
+			}
+		})
+	}
+}
 
 func TestDecodeBrowserResultPreservesRawCandidates(t *testing.T) {
 	payload := `{

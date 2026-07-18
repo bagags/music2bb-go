@@ -22,6 +22,10 @@ const navigationRetryDelay = 100 * time.Millisecond
 type Extractor struct {
 	Manager     *Manager
 	LoadTimeout time.Duration
+	// NoSandbox is reserved for controlled integration environments where the
+	// host policy prevents Chromium's sandbox from starting. Production callers
+	// should leave it false.
+	NoSandbox bool
 }
 
 func NewExtractor(manager *Manager) *Extractor {
@@ -96,11 +100,7 @@ func (e *Extractor) extractPlaylist(ctx context.Context, rawURL string) (playlis
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	process := launcher.New().
-		Context(ctx).
-		Bin(executable).
-		Headless(true).
-		Leakless(true)
+	process := newProcessLauncher(ctx, executable, e.NoSandbox)
 	controlURL, err := process.Launch()
 	if err != nil {
 		return playlist.RawResult{}, browserOperationError(ctx, ErrorLaunch, "launch", err)
@@ -171,6 +171,15 @@ func (e *Extractor) extractPlaylist(ctx context.Context, rawURL string) (playlis
 		return playlist.RawResult{}, &Error{Kind: ErrorExtraction, Op: "extract", Err: errors.New("dynamic page contained no track candidates")}
 	}
 	return raw, nil
+}
+
+func newProcessLauncher(ctx context.Context, executable string, noSandbox bool) *launcher.Launcher {
+	return launcher.New().
+		Context(ctx).
+		Bin(executable).
+		Headless(true).
+		NoSandbox(noSandbox).
+		Leakless(true)
 }
 
 type browserResult struct {

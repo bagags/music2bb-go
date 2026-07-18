@@ -221,7 +221,12 @@ ARM, attested, and published under an independent immutable browser release.
 All six music2bb release executables are browser-independent `CGO_ENABLED=0`
 builds. The deprecated public `Bundled` field is retained as false.
 
-The release pipeline runs each managed archive on its native architecture.
+The release pipeline runs each published managed archive on its native
+architecture. Manifest entries explicitly marked unavailable emit a CI notice
+and skip the browser smoke test until their independent browser build publishes
+the pinned archive. Linux CI disables Chromium's sandbox only for this isolated
+smoke test against a loopback-controlled page; production extraction keeps the
+sandbox enabled.
 Chromium snapshots intentionally build a sample-only `chrome://credits` page,
 so release packages instead use the checked-in complete credits artifact. Its
 official generated base, source-delta audit, supplemental entries, and SHA-256

@@ -76,7 +76,9 @@ func TestPinnedArchiveInstallLaunchAndExtraction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := NewExtractor(manager).ExtractPlaylist(ctx, source)
+	extractor := NewExtractor(manager)
+	extractor.NoSandbox = os.Getenv("MUSIC2BB_TEST_BROWSER_NO_SANDBOX") == "1"
+	result, err := extractor.ExtractPlaylist(ctx, source)
 	if err != nil {
 		t.Fatal(err)
 	}

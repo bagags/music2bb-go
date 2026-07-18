@@ -140,12 +140,13 @@ jobs:
             fs.appendFileSync(process.env.GITHUB_OUTPUT, `${key}=${value}\n`);
           }
           NODE
-      - name: Require published managed browser for releases
-        if: startsWith(github.ref, 'refs/tags/v') && steps.chromium.outputs.ready != 'true'
+      - name: Report unpublished managed browser
+        if: steps.chromium.outputs.ready != 'true'
         shell: bash
         run: |
-          echo "${{ matrix.platform }} managed browser is not published in the manifest" >&2
-          exit 1
+          echo "::notice::${{ matrix.platform }} managed browser is not published; native smoke test skipped"
+          echo "### ${{ matrix.platform }} managed browser" >> "$GITHUB_STEP_SUMMARY"
+          echo "Not published in the manifest; native smoke test skipped." >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/cache@v4
         if: steps.chromium.outputs.ready == 'true'
         id: browser-cache
@@ -180,6 +181,7 @@ jobs:
         shell: bash
         env:
           MUSIC2BB_TEST_BROWSER_ARCHIVE: ${{ github.workspace }}/.browser-cache/${{ matrix.archive }}
+          MUSIC2BB_TEST_BROWSER_NO_SANDBOX: ${{ runner.os == 'Linux' && '1' || '' }}
         run: go test -count=1 -tags=browser_install ./internal/browser -run TestPinnedArchiveInstallLaunchAndExtraction -v
 
   release:

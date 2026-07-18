@@ -134,6 +134,7 @@ jobs:
       - name: Install, launch, and extract a controlled page
         env:
           MUSIC2BB_TEST_BROWSER_ARCHIVE: ${{ github.workspace }}/browser-build/chromium-linux-arm64.zip
+          MUSIC2BB_TEST_BROWSER_NO_SANDBOX: "1"
         run: go test -count=1 -tags=browser_install ./internal/browser -run TestPinnedArchiveInstallLaunchAndExtraction -v
 
   publish:

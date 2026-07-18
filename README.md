@@ -291,7 +291,7 @@ go test -count=1 -tags=authenticated ./internal/bilibili \
   -run TestAuthenticatedFavoriteLifecycleCanary -v
 ```
 
-CI 运行单元、fixture、race、vet、标签编译、安装脚本语法检查、六个平台的无浏览器交叉构建，以及六个原生 runner 上的托管浏览器安装、启动和受控提取。Linux ARM64 的独立手动工作流固定源码、`depot_tools`、GN 参数和归档配方，在 `ubuntu-24.04-arm` 冒烟测试后发布独立浏览器 release、校验和、构建元数据和 artifact attestation。稳定版 `vMAJOR.MINOR.PATCH` 标签会自动发布 macOS、Windows、Linux 的 amd64/arm64 六个归档、各自 SHA-256、合并校验表和两个安装入口；发布包不含 Chromium 二进制或归档。
+CI 运行单元、fixture、race、vet、标签编译、安装脚本语法检查、六个平台的无浏览器交叉构建，并在各原生 runner 上安装、启动和受控提取所有已发布的托管浏览器；清单中明确标记为尚未发布的平台会生成 notice 并跳过浏览器冒烟测试。Linux runner 只在这个访问本地受控页面的隔离测试中使用 `--no-sandbox`，正常程序启动仍保留 Chromium 沙箱。Linux ARM64 的独立手动工作流固定源码、`depot_tools`、GN 参数和归档配方，在 `ubuntu-24.04-arm` 冒烟测试后发布独立浏览器 release、校验和、构建元数据和 artifact attestation。稳定版 `vMAJOR.MINOR.PATCH` 标签会自动发布 macOS、Windows、Linux 的 amd64/arm64 六个归档、各自 SHA-256、合并校验表和两个安装入口；发布包不含 Chromium 二进制或归档。
 
 ## 许可证
 
