@@ -58,6 +58,37 @@ go build -trimpath -o music2bb ./cmd/music2bb
 
 支持的发布目标：macOS ARM64/AMD64、Windows ARM64/AMD64、Linux ARM64/AMD64。所有目标都使用 `CGO_ENABLED=0` 构建，编译和打包时不会下载或嵌入 Chromium。
 
+## 原生桌面 GUI
+
+项目现已包含位于 `m2bb-gui` 的跨平台原生桌面 GUI。它基于 Gio 构建，不启动 Web 服务，也不依赖浏览器界面；歌单导入、Bilibili 匹配与审核、二维码登录、收藏夹写入、浏览器配置和状态管理均可在桌面程序中完成。
+
+GUI 与 CLI 使用同一套公开 Engine API。当前 GitHub Releases 仅发布 CLI，请从源码构建桌面 GUI：
+
+```powershell
+cd m2bb-gui
+go run -ldflags="-H windowsgui" .
+```
+
+在 macOS 或 Linux 上运行：
+
+```bash
+cd m2bb-gui
+go run .
+```
+
+Windows 构建可执行文件：
+
+```powershell
+cd m2bb-gui
+go build -trimpath -ldflags="-s -w -H windowsgui" -o dist/music2bb-desktop.exe .
+```
+
+如需使用已安装的 Chrome 或 Chromium，而非程序管理的浏览器，可在启动时指定其路径：
+
+```powershell
+.\music2bb-desktop.exe --browser-executable "C:\Program Files\Google\Chrome\Application\chrome.exe"
+```
+
 ## 使用
 
 ```text
