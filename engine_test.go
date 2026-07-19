@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -108,12 +109,12 @@ func TestLogoutClearsStoredCookiesAndPreservesConfiguration(t *testing.T) {
 
 func TestBrowserExecutablePathSelectsSystemBrowser(t *testing.T) {
 	root := t.TempDir()
-	executable := root + "/chromium"
+	executable := filepath.Join(root, "chromium")
 	if err := os.WriteFile(executable, []byte("browser"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	engine, err := New(Config{
-		ConfigDir: root + "/config", CacheDir: root + "/cache",
+		ConfigDir: filepath.Join(root, "config"), CacheDir: filepath.Join(root, "cache"),
 		Browser: BrowserOptions{ExecutablePath: executable},
 	}, WithStorage(testStorage()))
 	if err != nil {
